@@ -39,6 +39,13 @@ interface LeaveRequest {
   employee_id: string;
   start_date: string;
   end_date: string;
+  status: string; // APPROVED or PENDING
+}
+
+interface LeaveMultipliers {
+  informed_approved: number;   // default 1
+  informed_unapproved: number; // default 1.5
+  uninformed: number;          // default 2
 }
 
 interface LoanRecord {
@@ -54,13 +61,15 @@ interface LoanRecord {
 
 function computeForEmployee(
   empId: string,
+  doj: string,
   structures: SalaryStructure[],
   logs: AttendanceLog[],
   leaves: LeaveRequest[],
   loans: LoanRecord[],
-  totalWorkingDays: number,
+  totalDaysInMonth: number,
   periodMonth: number,
-  periodYear: number
+  periodYear: number,
+  multipliers: LeaveMultipliers
 ) {
   // Find latest salary structure for this employee
   const structure = structures
@@ -71,11 +80,24 @@ function computeForEmployee(
         new Date(a.effective_from).getTime()
     )[0];
 
+  // ── Proration Logic ──
+  const periodStart = new Date(periodYear, periodMonth - 1, 1);
+  const periodEnd = new Date(periodYear, periodMonth, 0);
+
+  const empDoj = new Date(doj);
+  const effectiveStart = empDoj > periodStart ? empDoj : periodStart;
+
+  const today = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
+  const isCurrentMonth = today.getFullYear() === periodYear && (today.getMonth() + 1) === periodMonth;
+  const effectiveEnd = isCurrentMonth ? today : periodEnd;
+
+  const expectedWorkingDays = Math.max(0, Math.floor((effectiveEnd.getTime() - effectiveStart.getTime()) / 86400000) + 1);
+
   const basicPay = Number(structure?.basic_pay || 15000);
   const hra = Number(structure?.hra || 6000);
   const allowances = Number(structure?.allowances || 4000);
-  const monthlyGross = basicPay + hra + allowances;
-  const dailySalary = monthlyGross / totalWorkingDays;
+  const fullMonthlyGross = basicPay + hra + allowances;
+  const dailySalary = fullMonthlyGross / totalDaysInMonth;
 
   // Count attendance
   const empLogs = logs.filter((l) => l.employee_id === empId);
@@ -94,31 +116,58 @@ function computeForEmployee(
     return sum;
   }, 0);
 
-  // Count approved leaves
+  // Count leaves by tier
   const empLeaves = leaves.filter((l) => l.employee_id === empId);
-  const leaveDays = empLeaves.reduce((sum, l) => {
-    const s = new Date(l.start_date);
-    const e = new Date(l.end_date);
-    return sum + Math.ceil((e.getTime() - s.getTime()) / 86400000) + 1;
-  }, 0);
+  const approvedLeaves = empLeaves.filter((l) => l.status === "APPROVED");
+  const pendingLeaves = empLeaves.filter((l) => l.status === "PENDING");
+
+  const countDays = (reqs: LeaveRequest[]) =>
+    reqs.reduce((sum, l) => {
+      // Normalize dates to noon to prevent timezone boundary issues
+      const s = new Date(l.start_date + "T12:00:00");
+      const e = new Date(l.end_date + "T12:00:00");
+      const effS = new Date(effectiveStart.getTime()); effS.setHours(12, 0, 0, 0);
+      const effE = new Date(effectiveEnd.getTime()); effE.setHours(12, 0, 0, 0);
+
+      const boundedStart = s > effS ? s : effS;
+      const boundedEnd = e < effE ? e : effE;
+
+      if (boundedStart > boundedEnd) return sum; // Leave is outside the working period
+
+      return sum + Math.round((boundedEnd.getTime() - boundedStart.getTime()) / 86400000) + 1;
+    }, 0);
+
+  const informedApprovedDays = countDays(approvedLeaves);
+  const informedUnapprovedDays = countDays(pendingLeaves);
 
   const effectiveDaysWorked = presentDays + halfDays * 0.5;
-  const unapprovedAbsent = Math.max(
+  const uninformedAbsentDays = Math.max(
     0,
-    totalWorkingDays - effectiveDaysWorked - leaveDays
+    expectedWorkingDays -
+      effectiveDaysWorked -
+      informedApprovedDays -
+      informedUnapprovedDays
   );
 
-  // Double penalty for unapproved absence
+  // Three-tier absence deduction using configurable multipliers
   const absenceDeduction =
-    unapprovedAbsent * dailySalary * 2 + leaveDays * dailySalary;
+    informedApprovedDays * dailySalary * multipliers.informed_approved +
+    informedUnapprovedDays * dailySalary * multipliers.informed_unapproved +
+    uninformedAbsentDays * dailySalary * multipliers.uninformed;
   const otRate = Number(structure?.ot_rate || 100);
   const overtimePay = otHours * otRate;
 
-  const grossPay = Math.max(0, monthlyGross - absenceDeduction + overtimePay);
+  // ── Earned Salary Components ──
+  const earnedBasic = Math.round((basicPay / totalDaysInMonth) * expectedWorkingDays);
+  const earnedHra = Math.round((hra / totalDaysInMonth) * expectedWorkingDays);
+  const earnedAllowances = Math.round((allowances / totalDaysInMonth) * expectedWorkingDays);
+  const expectedGross = earnedBasic + earnedHra + earnedAllowances;
+
+  const grossPay = Math.max(0, expectedGross - absenceDeduction + overtimePay);
 
   // ── Statutory Deductions ──
-  // PF: 12% of min(basic, ₹15,000)
-  const pfBase = Math.min(basicPay, 15000);
+  // PF: 12% of min(earnedBasic, ₹15,000)
+  const pfBase = Math.min(earnedBasic, 15000);
   const pfDeduction = Math.round(pfBase * 0.12);
 
   // ESI: 0.75% if gross < ₹21,000
@@ -166,9 +215,9 @@ function computeForEmployee(
   return {
     payslip: {
       employee_id: empId,
-      basic_pay: basicPay,
-      hra,
-      allowances,
+      basic_pay: earnedBasic,
+      hra: earnedHra,
+      allowances: earnedAllowances,
       incentives: 0,
       overtime_pay: Math.round(overtimePay),
       gross_pay: Math.round(grossPay),
@@ -179,11 +228,14 @@ function computeForEmployee(
       loan_deduction: loanDeduction,
       net_pay: Math.round(netPay),
       present_days: presentDays,
-      absent_days: unapprovedAbsent,
+      absent_days: uninformedAbsentDays,
       late_days: lateDays,
       half_days: halfDays,
-      leave_days: leaveDays,
-      late_deduction: absenceDeduction,
+      leave_days: informedApprovedDays,
+      late_deduction: Math.round(absenceDeduction),
+      informed_approved_days: informedApprovedDays,
+      informed_unapproved_days: informedUnapprovedDays,
+      uninformed_absent_days: uninformedAbsentDays,
     },
     loanUpdates,
   };
@@ -289,7 +341,7 @@ serve(async (req) => {
   // ── Fetch Employees ──
   let empQuery = supabase
     .from("employees")
-    .select("id, full_name, role, branch_id")
+    .select("id, full_name, role, branch_id, date_of_joining")
     .eq("status", "ACTIVE");
 
   if (body.branchId) {
@@ -311,8 +363,8 @@ serve(async (req) => {
   // ── Fetch Supporting Data ──
   const { start, end, totalDays } = istMonthRange(period.year, period.month);
 
-  const [structuresRes, attendanceRes, loansRes, leavesRes] = await Promise.all(
-    [
+  const [structuresRes, attendanceRes, loansRes, leavesRes, settingsRes] =
+    await Promise.all([
       supabase.from("salary_structures").select("*"),
       supabase
         .from("attendance_logs")
@@ -323,16 +375,42 @@ serve(async (req) => {
       supabase
         .from("leave_requests")
         .select("*")
-        .eq("status", "APPROVED")
+        .in("status", ["APPROVED", "PENDING"])
         .gte("start_date", start.split("T")[0])
         .lte("end_date", end.split("T")[0]),
-    ]
-  );
+      supabase
+        .from("organization_settings")
+        .select("key, value")
+        .in("key", [
+          "leave_deduction_informed_approved",
+          "leave_deduction_informed_unapproved",
+          "leave_deduction_uninformed",
+        ]),
+    ]);
 
   const structures = (structuresRes.data || []) as SalaryStructure[];
   const attendanceLogs = (attendanceRes.data || []) as AttendanceLog[];
   const activeLoans = (loansRes.data || []) as LoanRecord[];
-  const approvedLeaves = (leavesRes.data || []) as LeaveRequest[];
+  const allLeaves = (leavesRes.data || []) as LeaveRequest[];
+
+  // Parse leave deduction multipliers from settings
+  const settingsMap: Record<string, string> = {};
+  for (const row of settingsRes.data || []) {
+    settingsMap[row.key] = row.value;
+  }
+  const multipliers: LeaveMultipliers = {
+    informed_approved: Number(
+      JSON.parse(settingsMap.leave_deduction_informed_approved || '"1"')
+    ),
+    informed_unapproved: Number(
+      JSON.parse(
+        settingsMap.leave_deduction_informed_unapproved || '"1.5"'
+      )
+    ),
+    uninformed: Number(
+      JSON.parse(settingsMap.leave_deduction_uninformed || '"2"')
+    ),
+  };
 
   // ── Compute Payslips ──
   const allPayslips: Array<Record<string, unknown>> = [];
@@ -341,13 +419,15 @@ serve(async (req) => {
   for (const emp of employees) {
     const { payslip, loanUpdates } = computeForEmployee(
       emp.id,
+      emp.date_of_joining,
       structures,
       attendanceLogs,
-      approvedLeaves,
+      allLeaves,
       activeLoans,
       totalDays,
       period.month,
-      period.year
+      period.year,
+      multipliers
     );
 
     allPayslips.push({ ...payslip, period_id: period.id });

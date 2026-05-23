@@ -8,18 +8,19 @@ import type { Employee, Branch, AttendanceStatus } from "../../../lib/types";
 
 const STATUS_CONFIG: Record<AttendanceStatus | "-", { label: string; short: string; bg: string; color: string }> = {
   PRESENT: { label: "Present", short: "P", bg: "#dcfce7", color: "#166534" },
-  ABSENT: { label: "Absent (2x ded.)", short: "A", bg: "#fee2e2", color: "#991b1b" },
+  ABSENT: { label: "Uninformed Absence", short: "A", bg: "#fee2e2", color: "#991b1b" },
   HALF_DAY: { label: "Half Day", short: "H", bg: "#fef3c7", color: "#92400e" },
   LATE: { label: "Late", short: "L", bg: "#fef9c3", color: "#854d0e" },
   OT: { label: "Overtime", short: "O", bg: "#dbeafe", color: "#1e40af" },
-  LEAVE_APPROVED: { label: "Leave (Appr.)", short: "✓", bg: "#e0e7ff", color: "#3730a3" },
-  LEAVE_UNAPPROVED: { label: "Leave (Unappr.)", short: "✗", bg: "#fce7f3", color: "#9d174d" },
+  LEAVE_APPROVED: { label: "Informed Approved", short: "✓", bg: "#e0e7ff", color: "#3730a3" },
+  LEAVE_UNAPPROVED: { label: "Informed Unapproved", short: "✗", bg: "#fce7f3", color: "#9d174d" },
   "-": { label: "No Record", short: "-", bg: "var(--muted)", color: "var(--muted-foreground)" },
 };
 
 export default function AttendancePage() {
   const [employees, setEmployees] = useState<(Pick<Employee, "id" | "full_name" | "branch_id"> & { branches?: { name: string } | null })[]>([]);
   const [logs, setLogs] = useState<{ id: string; employee_id: string; check_in: string; check_out: string | null; status: string }[]>([]);
+  const [leaveRequests, setLeaveRequests] = useState<{ id: string; employee_id: string; start_date: string; end_date: string; status: string }[]>([]);
   const [branches, setBranches] = useState<Pick<Branch, "id" | "name">[]>([]);
   const [loading, setLoading] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false);
@@ -57,21 +58,30 @@ export default function AttendancePage() {
       .select("id, employee_id, check_in, check_out, status")
       .gte("check_in", startIST)
       .lte("check_in", endIST);
+    let leavesQuery = supabaseBrowser
+      .from("leave_requests")
+      .select("id, employee_id, start_date, end_date, status, employees!inner(branch_id)")
+      .in("status", ["APPROVED", "PENDING"])
+      .gte("start_date", `${year}-${pad(month + 1)}-01`)
+      .lte("end_date", `${year}-${pad(month + 1)}-${pad(lastDay)}`);
 
     if (globalBranch) {
       empQuery = empQuery.eq("branch_id", globalBranch.id);
       logsQuery = logsQuery.eq("branch_id", globalBranch.id);
+      leavesQuery = leavesQuery.eq("employees.branch_id", globalBranch.id);
     }
 
-    const [emps, syncLogs, branchRes] = await Promise.all([
+    const [emps, syncLogs, branchRes, leavesRes] = await Promise.all([
       empQuery,
       logsQuery,
       supabaseBrowser.from("branches").select("id, name"),
+      leavesQuery,
     ]);
 
     setEmployees((emps.data || []) as unknown as typeof employees);
     setLogs((syncLogs.data || []) as unknown as typeof logs);
     setBranches((branchRes.data || []) as unknown as typeof branches);
+    setLeaveRequests((leavesRes.data || []) as unknown as typeof leaveRequests);
     setLoading(false);
   }
 
@@ -110,19 +120,47 @@ export default function AttendancePage() {
   };
 
   const getStatus = (empId: string, day: number): AttendanceStatus | "-" => {
+    // Check attendance_logs first
     const log = logs.find(
       (l) => l.employee_id === empId && new Date(l.check_in).getDate() === day
     );
-    return (log?.status as AttendanceStatus) || "-";
+    // If we have a definitive attendance status (present, late, etc.), use it
+    if (log && log.status !== "ABSENT") return log.status as AttendanceStatus;
+
+    // Check leave requests for this day
+    const dayDate = new Date(year, month, day);
+    const leave = leaveRequests.find((lr) => {
+      if (lr.employee_id !== empId) return false;
+      const start = new Date(lr.start_date + "T00:00:00");
+      const end = new Date(lr.end_date + "T23:59:59");
+      return dayDate >= start && dayDate <= end;
+    });
+
+    if (leave) {
+      return leave.status === "APPROVED" ? "LEAVE_APPROVED" : "LEAVE_UNAPPROVED";
+    }
+
+    // If there's an ABSENT log, it's uninformed
+    if (log) return "ABSENT";
+
+    return "-";
   };
 
   const DAYS_IN_MONTH = new Date(year, month + 1, 0).getDate();
   const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
-  // Stats
-  const totalPresent = logs.filter((l) => l.status === "PRESENT" || l.status === "LATE").length;
-  const totalAbsent = logs.filter((l) => l.status === "ABSENT").length;
-  const totalOT = logs.filter((l) => l.status === "OT").length;
+  // Stats — compute by iterating all employee-days
+  let statPresent = 0, statAbsent = 0, statApprLeave = 0, statUnapprLeave = 0, statOT = 0;
+  for (const emp of employees) {
+    for (let d = 1; d <= DAYS_IN_MONTH; d++) {
+      const s = getStatus(emp.id, d);
+      if (s === "PRESENT" || s === "LATE") statPresent++;
+      else if (s === "ABSENT") statAbsent++;
+      else if (s === "LEAVE_APPROVED") statApprLeave++;
+      else if (s === "LEAVE_UNAPPROVED") statUnapprLeave++;
+      else if (s === "OT") statOT++;
+    }
+  }
 
   return (
     <div>
@@ -146,9 +184,6 @@ export default function AttendancePage() {
 
       {/* Filters Row */}
       <div className="flex gap-4 mb-6 items-end">
-        <div className="flex gap-2 min-w-[150px]">
-          {/* Note: Branch selection is now handled globally via the Top Nav context switcher */}
-        </div>
         <div className="form-group min-w-[140px]">
           <label className="label">Month</label>
           <select className="input" value={month} onChange={(e) => setMonth(Number(e.target.value))}>
@@ -164,15 +199,23 @@ export default function AttendancePage() {
         <div className="flex gap-4 ml-auto">
           <div className="card stat-card py-2 px-4 min-w-[80px]">
             <span className="stat-label text-[0.65rem]">Present</span>
-            <span className="stat-value text-xl">{totalPresent}</span>
+            <span className="stat-value text-xl">{statPresent}</span>
           </div>
           <div className="card stat-card py-2 px-4 min-w-[80px]">
             <span className="stat-label text-[0.65rem]">Absent</span>
-            <span className="stat-value text-xl text-destructive">{totalAbsent}</span>
+            <span className="stat-value text-xl text-destructive">{statAbsent}</span>
+          </div>
+          <div className="card stat-card py-2 px-4 min-w-[80px]">
+            <span className="stat-label text-[0.65rem]">Appr. Leave</span>
+            <span className="stat-value text-xl" style={{color: "#3730a3"}}>{statApprLeave}</span>
+          </div>
+          <div className="card stat-card py-2 px-4 min-w-[80px]">
+            <span className="stat-label text-[0.65rem]">Unappr. Leave</span>
+            <span className="stat-value text-xl" style={{color: "#9d174d"}}>{statUnapprLeave}</span>
           </div>
           <div className="card stat-card py-2 px-4 min-w-[80px]">
             <span className="stat-label text-[0.65rem]">OT</span>
-            <span className="stat-value text-xl">{totalOT}</span>
+            <span className="stat-value text-xl">{statOT}</span>
           </div>
         </div>
       </div>
@@ -189,7 +232,15 @@ export default function AttendancePage() {
               <tr>
                 <th className="min-w-[160px] sticky left-0 bg-card z-[2]">Employee</th>
                 {Array.from({ length: DAYS_IN_MONTH }).map((_, i) => (
-                  <th key={i} className="text-center w-[30px] p-1">{i + 1}</th>
+                  <th key={i} className="text-center w-[30px] p-1">
+                    <Link 
+                      href={`/attendance/daily/${year}-${String(month + 1).padStart(2, "0")}-${String(i + 1).padStart(2, "0")}`}
+                      className="hover:bg-muted/50 w-full h-full rounded py-1 transition-colors cursor-pointer text-primary hover:text-primary/80 font-bold inline-block"
+                      title="View Daily Details"
+                    >
+                      {i + 1}
+                    </Link>
+                  </th>
                 ))}
               </tr>
             </thead>

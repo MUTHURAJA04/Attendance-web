@@ -35,6 +35,8 @@ function NewEmployeeForm() {
     phone: "",
     branch_id: preSelectedBranch || "",
     date_of_joining: new Date().toISOString().split("T")[0],
+    date_of_birth: "",
+    gender: "",
     department: "",
     shift_type: "regular" as "regular" | "break",
     shift_start: "10:00",
@@ -367,6 +369,8 @@ function NewEmployeeForm() {
       phone: formData.phone,
       branch_id: formData.branch_id,
       date_of_joining: formData.date_of_joining,
+      date_of_birth: formData.date_of_birth || null,
+      gender: formData.gender || null,
       department: formData.department,
       shift_type: formData.shift_type,
       shift_start: formData.shift_start,
@@ -493,6 +497,22 @@ function NewEmployeeForm() {
               <div className="form-group w-[160px]">
                 <label className="label">Joining Date</label>
                 <input className="input" type="date" value={formData.date_of_joining} onChange={(e) => field("date_of_joining", e.target.value)} />
+              </div>
+            </div>
+            
+            <div className="flex gap-4">
+              <div className="form-group flex-1">
+                <label className="label">Date of Birth</label>
+                <input className="input" type="date" value={formData.date_of_birth} onChange={(e) => field("date_of_birth", e.target.value)} />
+              </div>
+              <div className="form-group flex-1">
+                <label className="label">Gender</label>
+                <select className="input" value={formData.gender} onChange={(e) => field("gender", e.target.value)}>
+                  <option value="">Select Gender</option>
+                  <option value="MALE">Male</option>
+                  <option value="FEMALE">Female</option>
+                  <option value="OTHER">Other</option>
+                </select>
               </div>
             </div>
 

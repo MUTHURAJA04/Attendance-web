@@ -40,6 +40,8 @@ export type EmployeeCreateInput = {
   role: EmployeeRole;
   branchId: string;
   dateOfJoining: string;
+  dateOfBirth?: string;
+  gender?: "MALE" | "FEMALE" | "OTHER";
   phone: string;
   address?: string;
   emergencyContactName: string;

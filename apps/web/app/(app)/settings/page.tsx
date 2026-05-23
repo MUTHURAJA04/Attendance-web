@@ -13,6 +13,9 @@ interface OrgSettings {
     esi_employee_pct: number;
     esi_employer_pct: number;
     esi_wage_limit: number;
+    leave_deduction_informed_approved: number;
+    leave_deduction_informed_unapproved: number;
+    leave_deduction_uninformed: number;
 }
 
 const DEFAULT_SETTINGS: OrgSettings = {
@@ -25,6 +28,9 @@ const DEFAULT_SETTINGS: OrgSettings = {
     esi_employee_pct: 0.75,
     esi_employer_pct: 3.25,
     esi_wage_limit: 21000,
+    leave_deduction_informed_approved: 1,
+    leave_deduction_informed_unapproved: 1.5,
+    leave_deduction_uninformed: 2,
 };
 
 export default function SettingsPage() {
@@ -133,6 +139,39 @@ export default function SettingsPage() {
                 </div>
 
                 <div className="flex flex-col gap-8">
+                    <div className="card">
+                        <h2 className="mb-2">Leave & Absence Deductions</h2>
+                        <p className="text-muted-foreground text-sm mb-6">
+                            Configure salary deduction multipliers for different types of absences. The multiplier is applied to the daily salary rate.
+                        </p>
+                        <div className="flex flex-col gap-4">
+                            <div className="form-group">
+                                <label className="label">Informed Approved Leave</label>
+                                <div className="flex items-center gap-2">
+                                    <input className="input flex-1" type="number" step="0.1" value={settings.leave_deduction_informed_approved} onChange={(e) => setSettings({ ...settings, leave_deduction_informed_approved: Number(e.target.value) })} />
+                                    <span className="text-muted-foreground text-sm whitespace-nowrap">× daily salary</span>
+                                </div>
+                                <span className="text-muted-foreground text-xs">Leave request filed and approved (e.g., 1× = 1 day salary deducted per leave day)</span>
+                            </div>
+                            <div className="form-group">
+                                <label className="label">Informed Unapproved Leave</label>
+                                <div className="flex items-center gap-2">
+                                    <input className="input flex-1" type="number" step="0.1" value={settings.leave_deduction_informed_unapproved} onChange={(e) => setSettings({ ...settings, leave_deduction_informed_unapproved: Number(e.target.value) })} />
+                                    <span className="text-muted-foreground text-sm whitespace-nowrap">× daily salary</span>
+                                </div>
+                                <span className="text-muted-foreground text-xs">Leave request filed but not yet approved (e.g., 1.5× = 1.5 days salary deducted)</span>
+                            </div>
+                            <div className="form-group">
+                                <label className="label">Uninformed Absence</label>
+                                <div className="flex items-center gap-2">
+                                    <input className="input flex-1" type="number" step="0.1" value={settings.leave_deduction_uninformed} onChange={(e) => setSettings({ ...settings, leave_deduction_uninformed: Number(e.target.value) })} />
+                                    <span className="text-muted-foreground text-sm whitespace-nowrap">× daily salary</span>
+                                </div>
+                                <span className="text-muted-foreground text-xs">Absent without any leave request (e.g., 2× = 2 days salary deducted per absent day)</span>
+                            </div>
+                        </div>
+                    </div>
+
                     <div className="card bg-primary text-primary-foreground">
                         <h2 className="mb-2">Save Changes</h2>
                         <p className="opacity-80 mb-6 text-sm">

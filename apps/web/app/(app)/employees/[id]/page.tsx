@@ -10,12 +10,12 @@ import { PayslipModal } from "../../../../components/PayslipModal";
 // ── Attendance Status Map ──
 const STATUS_MAP: Record<string, { label: string; short: string; bg: string; color: string }> = {
     PRESENT: { label: "Present", short: "P", bg: "#dcfce7", color: "#166534" },
-    ABSENT: { label: "Absent", short: "A", bg: "#fef2f2", color: "#991b1b" },
+    ABSENT: { label: "Uninformed Absence", short: "A", bg: "#fef2f2", color: "#991b1b" },
     HALF_DAY: { label: "Half Day", short: "H", bg: "#fef9c3", color: "#854d0e" },
     LATE: { label: "Late", short: "L", bg: "#fff7ed", color: "#9a3412" },
     OT: { label: "Overtime", short: "OT", bg: "#ede9fe", color: "#5b21b6" },
-    LEAVE_APPROVED: { label: "Leave", short: "✓", bg: "#dbeafe", color: "#1e40af" },
-    LEAVE_UNAPPROVED: { label: "Leave (U)", short: "✗", bg: "#fce7f3", color: "#9d174d" },
+    LEAVE_APPROVED: { label: "Informed Approved", short: "✓", bg: "#dbeafe", color: "#1e40af" },
+    LEAVE_UNAPPROVED: { label: "Informed Unapproved", short: "✗", bg: "#fce7f3", color: "#9d174d" },
     "-": { label: "No Record", short: "-", bg: "var(--muted)", color: "var(--muted-foreground)" },
 };
 
@@ -46,6 +46,7 @@ export default function EmployeeDetailPage() {
     const [attYear, setAttYear] = useState(new Date().getFullYear());
     const [attLogs, setAttLogs] = useState<AttendanceLog[]>([]);
     const [attLoading, setAttLoading] = useState(false);
+    const [empLeaveRequests, setEmpLeaveRequests] = useState<{ id: string; start_date: string; end_date: string; status: string }[]>([]);
 
     // Documents tab states
     const [documents, setDocuments] = useState<EmployeeDocument[]>([]);
@@ -87,14 +88,28 @@ export default function EmployeeDetailPage() {
         setAttLoading(true);
         const start = new Date(attYear, attMonth, 1);
         const end = new Date(attYear, attMonth + 1, 0, 23, 59, 59);
-        const { data } = await supabaseBrowser
-            .from("attendance_logs")
-            .select("*")
-            .eq("employee_id", id)
-            .gte("check_in", start.toISOString())
-            .lte("check_in", end.toISOString())
-            .order("check_in", { ascending: true });
-        setAttLogs((data || []) as AttendanceLog[]);
+        const lastDay = new Date(attYear, attMonth + 1, 0).getDate();
+        const monthStr = String(attMonth + 1).padStart(2, '0');
+
+        const [attRes, leavesRes] = await Promise.all([
+            supabaseBrowser
+                .from("attendance_logs")
+                .select("*")
+                .eq("employee_id", id)
+                .gte("check_in", start.toISOString())
+                .lte("check_in", end.toISOString())
+                .order("check_in", { ascending: true }),
+            supabaseBrowser
+                .from("leave_requests")
+                .select("id, start_date, end_date, status")
+                .eq("employee_id", id)
+                .in("status", ["APPROVED", "PENDING"])
+                .gte("start_date", `${attYear}-${monthStr}-01`)
+                .lte("end_date", `${attYear}-${monthStr}-${String(lastDay).padStart(2, '0')}`),
+        ]);
+
+        setAttLogs((attRes.data || []) as AttendanceLog[]);
+        setEmpLeaveRequests((leavesRes.data || []) as typeof empLeaveRequests);
         setAttLoading(false);
     }
 
@@ -330,15 +345,41 @@ export default function EmployeeDetailPage() {
     // ── Attendance helpers ──
     const DAYS_IN_MONTH = new Date(attYear, attMonth + 1, 0).getDate();
     const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
-    const getAttStatus = (day: number): AttendanceStatus | "-" => {
-        const log = attLogs.find(l => new Date(l.check_in).getDate() === day);
-        return (log?.status as AttendanceStatus) || "-";
+    const getAttStatus = (day: number) => {
+        const log = attLogs.find((l) => new Date(l.check_in).getDate() === day);
+        // If we have a definitive non-ABSENT status, use it
+        if (log && log.status !== "ABSENT") return log.status;
+
+        // Check leave requests for this day
+        const dayDate = new Date(attYear, attMonth, day);
+        const leave = empLeaveRequests.find((lr) => {
+            const start = new Date(lr.start_date + "T00:00:00");
+            const end = new Date(lr.end_date + "T23:59:59");
+            return dayDate >= start && dayDate <= end;
+        });
+
+        if (leave) {
+            return leave.status === "APPROVED" ? "LEAVE_APPROVED" : "LEAVE_UNAPPROVED";
+        }
+
+        // If ABSENT log exists with no leave request = uninformed
+        if (log) return "ABSENT";
+
+        return "-";
     };
-    const attPresent = attLogs.filter(l => l.status === "PRESENT" || l.status === "LATE").length;
-    const attAbsent = attLogs.filter(l => l.status === "ABSENT").length;
-    const attLate = attLogs.filter(l => l.status === "LATE").length;
-    const attHalf = attLogs.filter(l => l.status === "HALF_DAY").length;
-    const attLeave = attLogs.filter(l => l.status === "LEAVE_APPROVED" || l.status === "LEAVE_UNAPPROVED").length;
+
+    // Compute stats using getAttStatus which now considers leave_requests
+    const DAYS_IN_ATT_MONTH = new Date(attYear, attMonth + 1, 0).getDate();
+    let attPresent = 0, attAbsentUninformed = 0, attLate = 0, attHalfDay = 0, attApprLeave = 0, attUnapprLeave = 0;
+    for (let d = 1; d <= DAYS_IN_ATT_MONTH; d++) {
+        const s = getAttStatus(d);
+        if (s === "PRESENT") attPresent++;
+        else if (s === "ABSENT") attAbsentUninformed++;
+        else if (s === "LATE") attLate++;
+        else if (s === "HALF_DAY") attHalfDay++;
+        else if (s === "LEAVE_APPROVED") attApprLeave++;
+        else if (s === "LEAVE_UNAPPROVED") attUnapprLeave++;
+    }
 
     // ── Loans ledger helpers ──
     const activeLoans = loans.filter(l => l.status === "ACTIVE");
@@ -444,9 +485,11 @@ export default function EmployeeDetailPage() {
                 {activeTab === "profile" && (
                     <div className="flex flex-col gap-8">
                         <section>
-                            <h3 className="mb-4 text-base font-semibold text-muted-foreground uppercase tracking-wider">Personal & Contact Info</h3>
-                            <div className="bg-card rounded-xl p-6 shadow-sm flex flex-col gap-6">
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <h3 className="mb-4 text-sm font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2">
+                                <span className="w-2 h-2 rounded-full bg-indigo-500"></span> Personal & Contact Info
+                            </h3>
+                            <div className="bg-card rounded-xl p-6 shadow-sm border border-border/40 flex flex-col gap-6">
+                                <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
                                     <div className="flex flex-col gap-1">
                                         <span className="text-xs font-medium text-muted-foreground uppercase tracking-widest">Full Name</span>
                                         <span className="text-sm font-medium">{employee.full_name}</span>
@@ -455,50 +498,118 @@ export default function EmployeeDetailPage() {
                                         <span className="text-xs font-medium text-muted-foreground uppercase tracking-widest">Phone</span>
                                         <span className="text-sm font-medium">{employee.phone}</span>
                                     </div>
+                                    <div className="flex flex-col gap-1">
+                                        <span className="text-xs font-medium text-muted-foreground uppercase tracking-widest">Gender</span>
+                                        <span className="text-sm font-medium capitalize">{employee.gender?.toLowerCase() || "Not specified"}</span>
+                                    </div>
+                                    <div className="flex flex-col gap-1">
+                                        <span className="text-xs font-medium text-muted-foreground uppercase tracking-widest">Date of Birth</span>
+                                        <span className="text-sm font-medium">
+                                            {employee.date_of_birth 
+                                                ? new Date(employee.date_of_birth).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) 
+                                                : "Not specified"}
+                                        </span>
+                                    </div>
                                 </div>
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-6 border-t border-border/50">
+                                <div className="flex flex-col gap-1 pt-6 border-t border-border/40">
+                                    <span className="text-xs font-medium text-muted-foreground uppercase tracking-widest">Address</span>
+                                    <span className="text-sm font-medium">{employee.address || "N/A"}</span>
+                                </div>
+                                <div className="grid grid-cols-1 gap-6 pt-6 border-t border-border/40">
                                     <div className="flex flex-col gap-2">
                                         <span className="text-xs font-medium text-muted-foreground uppercase tracking-widest">Emergency Contacts</span>
                                         {(!employee.emergency_contacts || employee.emergency_contacts.length === 0) ? (
                                             <span className="text-sm font-medium">{employee.emergency_contact_name || "N/A"} <span className="text-muted-foreground mx-1">—</span> {employee.emergency_contact_phone || "N/A"}</span>
                                         ) : (
-                                            <div className="flex flex-col gap-1.5 mt-1">
+                                            <div className="flex flex-col gap-2 mt-1">
                                                 {employee.emergency_contacts.map((ec: any, idx: number) => (
-                                                    <div key={idx} className="flex gap-2 items-center text-sm font-medium">
-                                                        <span>{ec.name}</span>
-                                                        <span className="text-muted-foreground mx-1">—</span>
-                                                        <span>{ec.phone}</span>
-                                                        {ec.relation && <span className="pill text-[0.6rem] !bg-muted/50 !text-muted-foreground uppercase ml-1">{ec.relation}</span>}
+                                                    <div key={idx} className="flex gap-2 items-center text-sm font-medium bg-muted/40 px-3 py-2 rounded-md w-fit border border-border/50">
+                                                        <span className="text-foreground">{ec.name}</span>
+                                                        <span className="text-muted-foreground/40 mx-1">—</span>
+                                                        <span className="text-foreground font-mono tracking-wide">{ec.phone}</span>
+                                                        {ec.relation && <span className="pill text-[0.6rem] !bg-indigo-100 !text-indigo-800 uppercase ml-2">{ec.relation}</span>}
                                                     </div>
                                                 ))}
                                             </div>
                                         )}
                                     </div>
                                 </div>
-                                <div className="flex flex-col gap-1 pt-6 border-t border-border/50">
-                                    <span className="text-xs font-medium text-muted-foreground uppercase tracking-widest">Address</span>
-                                    <span className="text-sm font-medium">{employee.address || "N/A"}</span>
-                                </div>
                             </div>
                         </section>
 
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                            <section>
+                                <h3 className="mb-4 text-sm font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2">
+                                    <span className="w-2 h-2 rounded-full bg-emerald-500"></span> Bank Details
+                                </h3>
+                                <div className="bg-card rounded-xl p-6 shadow-sm border border-border/40 flex flex-col gap-6 h-[calc(100%-2.5rem)]">
+                                    <div className="flex flex-col gap-1">
+                                        <span className="text-xs font-medium text-muted-foreground uppercase tracking-widest">Account Number</span>
+                                        <span className="text-sm font-mono font-medium tracking-wider bg-muted/40 px-3 py-1.5 rounded-md w-fit border border-border/50">{employee.bank_account_number || "Not specified"}</span>
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-6 pt-4 border-t border-border/40">
+                                        <div className="flex flex-col gap-1">
+                                            <span className="text-xs font-medium text-muted-foreground uppercase tracking-widest">IFSC Code</span>
+                                            <span className="text-sm font-medium uppercase">{employee.bank_ifsc || "N/A"}</span>
+                                        </div>
+                                        <div className="flex flex-col gap-1">
+                                            <span className="text-xs font-medium text-muted-foreground uppercase tracking-widest">Bank Name</span>
+                                            <span className="text-sm font-medium">{employee.bank_name || "N/A"}</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </section>
+
+                            <section>
+                                <h3 className="mb-4 text-sm font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2">
+                                    <span className="w-2 h-2 rounded-full bg-amber-500"></span> Statutory & Compliance
+                                </h3>
+                                <div className="bg-card rounded-xl p-6 shadow-sm border border-border/40 flex flex-col gap-6 h-[calc(100%-2.5rem)]">
+                                    <div className="grid grid-cols-2 gap-6">
+                                        <div className="flex flex-col gap-1">
+                                            <span className="text-xs font-medium text-muted-foreground uppercase tracking-widest">Aadhaar Number</span>
+                                            <span className="text-sm font-mono font-medium tracking-widest bg-muted/40 px-3 py-1.5 rounded-md w-fit border border-border/50">{employee.aadhaar ? employee.aadhaar.replace(/(\d{4})/g, '$1 ').trim() : "Not specified"}</span>
+                                        </div>
+                                        <div className="flex flex-col gap-1">
+                                            <span className="text-xs font-medium text-muted-foreground uppercase tracking-widest">PAN</span>
+                                            <span className="text-sm font-mono font-medium uppercase tracking-widest">{employee.pan || "Not specified"}</span>
+                                        </div>
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-6 pt-5 border-t border-border/40">
+                                        <div className="flex flex-col gap-1">
+                                            <span className="text-xs font-medium text-muted-foreground uppercase tracking-widest">PF UAN</span>
+                                            <span className="text-sm font-medium font-mono">{employee.pf_uan || "Not specified"}</span>
+                                        </div>
+                                        <div className="flex flex-col gap-1">
+                                            <span className="text-xs font-medium text-muted-foreground uppercase tracking-widest">ESI Number</span>
+                                            <span className="text-sm font-medium font-mono">{employee.esi_number || "Not specified"}</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </section>
+                        </div>
+
                         <section>
-                            <h3 className="mb-4 text-base font-semibold text-muted-foreground uppercase tracking-wider">Department, Roles & Capabilities</h3>
-                            <div className="bg-card rounded-xl p-6 shadow-sm flex flex-col gap-6">
+                            <h3 className="mb-4 text-sm font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2">
+                                <span className="w-2 h-2 rounded-full bg-rose-500"></span> Operations
+                            </h3>
+                            <div className="bg-card rounded-xl p-6 shadow-sm border border-border/40 flex flex-col gap-6">
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                     <div className="flex flex-col gap-1">
                                         <span className="text-xs font-medium text-muted-foreground uppercase tracking-widest">Department</span>
                                         <span className="text-sm font-medium">{employee.department || "Not assigned"}</span>
                                     </div>
                                     <div className="flex flex-col gap-1">
-                                        <span className="text-xs font-medium text-muted-foreground uppercase tracking-widest">Shift</span>
-                                        <span className="text-sm font-medium">{employee.shift_start || "10:00"} – {employee.shift_end || "22:00"}</span>
+                                        <span className="text-xs font-medium text-muted-foreground uppercase tracking-widest">Shift Timing</span>
+                                        <div className="flex items-center gap-2 mt-1">
+                                            <span className="pill text-[0.7rem] !bg-rose-50 !text-rose-700 !border-rose-200 !py-1">{employee.shift_start || "10:00"} – {employee.shift_end || "22:00"}</span>
+                                        </div>
                                     </div>
                                 </div>
-                                <div className="flex flex-col gap-2 pt-6 border-t border-border/50">
+                                <div className="flex flex-col gap-2 pt-6 border-t border-border/40">
                                     <span className="text-xs font-medium text-muted-foreground uppercase tracking-widest">Roles & Capabilities</span>
                                     <div className="flex flex-wrap gap-2 mt-1">
-                                        {employee.skills?.map((s: string) => <span key={s} className="pill pill-primary text-xs !bg-primary/5 !text-primary !border-primary/20">{s.replace("_", " ")}</span>) || <span className="text-muted-foreground text-sm italic">No roles or capabilities documented</span>}
+                                        {employee.skills?.map((s: string) => <span key={s} className="pill pill-primary text-xs !bg-primary/5 !text-primary !border-primary/20 shadow-sm">{s.replace("_", " ")}</span>) || <span className="text-muted-foreground text-sm italic">No roles or capabilities documented</span>}
                                     </div>
                                 </div>
                             </div>
@@ -587,26 +698,30 @@ export default function EmployeeDetailPage() {
                         </div>
 
                         {/* Summary Cards */}
-                        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-                            <div className="bg-emerald-50 rounded-xl p-4 text-center">
-                                <div className="text-2xl font-bold text-emerald-700">{attPresent}</div>
-                                <div className="text-xs text-emerald-600 font-medium mt-1">Present</div>
+                        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+                            <div className="stat-card" style={{ borderColor: "#dcfce7" }}>
+                                <span className="stat-value text-3xl" style={{ color: "#166534" }}>{attPresent}</span>
+                                <span className="stat-label">Present</span>
                             </div>
-                            <div className="bg-red-50 rounded-xl p-4 text-center">
-                                <div className="text-2xl font-bold text-red-700">{attAbsent}</div>
-                                <div className="text-xs text-red-600 font-medium mt-1">Absent</div>
+                            <div className="stat-card" style={{ borderColor: "#fef2f2" }}>
+                                <span className="stat-value text-3xl" style={{ color: "#991b1b" }}>{attAbsentUninformed}</span>
+                                <span className="stat-label">Uninformed</span>
                             </div>
-                            <div className="bg-orange-50 rounded-xl p-4 text-center">
-                                <div className="text-2xl font-bold text-orange-700">{attLate}</div>
-                                <div className="text-xs text-orange-600 font-medium mt-1">Late</div>
+                            <div className="stat-card" style={{ borderColor: "#fef9c3" }}>
+                                <span className="stat-value text-3xl" style={{ color: "#92400e" }}>{attLate}</span>
+                                <span className="stat-label">Late</span>
                             </div>
-                            <div className="bg-yellow-50 rounded-xl p-4 text-center">
-                                <div className="text-2xl font-bold text-yellow-700">{attHalf}</div>
-                                <div className="text-xs text-yellow-600 font-medium mt-1">Half Day</div>
+                            <div className="stat-card" style={{ borderColor: "#fff7ed" }}>
+                                <span className="stat-value text-3xl" style={{ color: "#854d0e" }}>{attHalfDay}</span>
+                                <span className="stat-label">Half Day</span>
                             </div>
-                            <div className="bg-blue-50 rounded-xl p-4 text-center">
-                                <div className="text-2xl font-bold text-blue-700">{attLeave}</div>
-                                <div className="text-xs text-blue-600 font-medium mt-1">Leaves</div>
+                            <div className="stat-card" style={{ borderColor: "#dbeafe" }}>
+                                <span className="stat-value text-3xl" style={{ color: "#3730a3" }}>{attApprLeave}</span>
+                                <span className="stat-label">Appr. Leave</span>
+                            </div>
+                            <div className="stat-card" style={{ borderColor: "#fce7f3" }}>
+                                <span className="stat-value text-3xl" style={{ color: "#9d174d" }}>{attUnapprLeave}</span>
+                                <span className="stat-label">Unappr. Leave</span>
                             </div>
                         </div>
 

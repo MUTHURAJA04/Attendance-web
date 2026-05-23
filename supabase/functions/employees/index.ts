@@ -12,6 +12,8 @@ type EmployeeCreateInput = {
   role: "STAFF" | "MANAGER" | "KITCHEN" | "CASHIER";
   branchId: string;
   dateOfJoining: string;
+  dateOfBirth?: string;
+  gender?: "MALE" | "FEMALE" | "OTHER";
   phone: string;
   address?: string;
   emergencyContactName: string;
@@ -120,6 +122,8 @@ serve(async (req) => {
       role: payload.role,
       branch_id: payload.branchId,
       date_of_joining: payload.dateOfJoining,
+      date_of_birth: payload.dateOfBirth ?? null,
+      gender: payload.gender ?? null,
       phone: payload.phone,
       address: payload.address ?? null,
       emergency_contact_name: payload.emergencyContactName,

@@ -112,9 +112,9 @@ export default function HolidaysPage() {
                     </thead>
                     <tbody>
                         {loading ? (
-                            <tr><td colSpan={5} className="centered">Loading holidays...</td></tr>
+                            <tr><td colSpan={5} className="text-center py-8 text-muted-foreground">Loading holidays...</td></tr>
                         ) : holidays.length === 0 ? (
-                            <tr><td colSpan={5} className="centered">No holidays declared yet.</td></tr>
+                            <tr><td colSpan={5} className="text-center py-8 text-muted-foreground">No holidays declared yet.</td></tr>
                         ) : (
                             holidays.map((h) => (
                                 <tr key={h.id}>

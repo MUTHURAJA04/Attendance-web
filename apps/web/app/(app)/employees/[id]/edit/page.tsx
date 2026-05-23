@@ -37,6 +37,8 @@ export default function EditEmployeePage() {
         role: "STAFF",
         branch_id: "",
         date_of_joining: "",
+        date_of_birth: "",
+        gender: "",
         phone: "",
         address: "",
         emergency_contacts: [] as { name: string; phone: string; relation: string }[],
@@ -257,6 +259,21 @@ export default function EditEmployeePage() {
                             <div className="form-group flex-1">
                                 <label className="label">Joining Date</label>
                                 <input className="input" type="date" value={formData.date_of_joining} onChange={e => setFormData({ ...formData, date_of_joining: e.target.value })} />
+                            </div>
+                        </div>
+                        <div className="flex gap-4">
+                            <div className="form-group flex-1">
+                                <label className="label">Date of Birth</label>
+                                <input className="input" type="date" value={formData.date_of_birth || ""} onChange={e => setFormData({ ...formData, date_of_birth: e.target.value })} />
+                            </div>
+                            <div className="form-group flex-1">
+                                <label className="label">Gender</label>
+                                <select className="input" value={formData.gender || ""} onChange={e => setFormData({ ...formData, gender: e.target.value })}>
+                                    <option value="">Select Gender</option>
+                                    <option value="MALE">Male</option>
+                                    <option value="FEMALE">Female</option>
+                                    <option value="OTHER">Other</option>
+                                </select>
                             </div>
                         </div>
                         <div className="flex gap-4">
