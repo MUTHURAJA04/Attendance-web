@@ -1,0 +1,9 @@
+# Edge Functions validate JWT and roles manually; gateway JWT check causes 401 with user tokens
+[functions.branches]
+verify_jwt = false
+
+[functions.roles]
+verify_jwt = false
+
+[functions.employees]
+verify_jwt = false

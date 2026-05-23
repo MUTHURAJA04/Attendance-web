@@ -1,0 +1,20 @@
+{
+  "name": "attendance-suite",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@10.33.4",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:web": "pnpm --filter @attendance/web dev",
+    "build:web": "pnpm --filter @attendance/web build",
+    "lint:web": "pnpm --filter @attendance/web lint",
+    "typecheck": "pnpm -r run typecheck"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["sharp"]
+  }
+}
+

@@ -1,0 +1,306 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", "system-ui", "-apple-system", "sans-serif";
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent-2: var(--accent-2);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-ring: var(--ring);
+  --color-success: #16a34a;
+  --color-warning: #d97706;
+
+  --radius-default: var(--radius);
+}
+
+/* ═══════════════════════════════════════════════════
+   Design Tokens
+   ═══════════════════════════════════════════════════ */
+@layer base {
+  :root {
+    --background: #ffffff;
+    --foreground: #09090b;
+    --muted: #f4f4f5;
+    --muted-foreground: #71717a;
+    --popover: #ffffff;
+    --popover-foreground: #09090b;
+    --card: #ffffff;
+    --card-foreground: #09090b;
+    --border: #e4e4e7;
+    --input: #e4e4e7;
+    --primary: #18181b;
+    --primary-foreground: #fafafa;
+    --secondary: #f4f4f5;
+    --secondary-foreground: #18181b;
+    --accent: #f4f4f5;
+    --accent-foreground: #18181b;
+    --accent-2: #16a34a;
+    --destructive: #ef4444;
+    --destructive-foreground: #fafafa;
+    --ring: #18181b;
+    --radius: 0.5rem;
+    --sidebar-width: 260px;
+  }
+
+  .dark {
+    --background: #09090b;
+    --foreground: #fafafa;
+    --muted: #27272a;
+    --muted-foreground: #a1a1aa;
+    --popover: #09090b;
+    --popover-foreground: #fafafa;
+    --card: #111113;
+    --card-foreground: #fafafa;
+    --border: #27272a;
+    --input: #27272a;
+    --primary: #fafafa;
+    --primary-foreground: #18181b;
+    --secondary: #27272a;
+    --secondary-foreground: #fafafa;
+    --accent: #27272a;
+    --accent-foreground: #fafafa;
+    --destructive: #7f1d1d;
+    --destructive-foreground: #fafafa;
+    --ring: #d4d4d8;
+  }
+
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+  }
+
+  body {
+    background-color: var(--muted);
+    color: var(--foreground);
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+}
+
+/* ═══════════════════════════════════════════════════
+   Component Classes (used via className in JSX)
+   ═══════════════════════════════════════════════════ */
+@layer components {
+
+  /* ── App Shell Layout ─────────────────────────── */
+  .app-layout {
+    @apply flex min-h-screen;
+  }
+
+  .sidebar {
+    width: var(--sidebar-width);
+    @apply border-r border-border bg-background flex flex-col sticky top-0 h-screen shrink-0;
+  }
+
+  .sidebar-header {
+    @apply px-6 py-5 border-b border-border font-bold text-base tracking-tight;
+  }
+
+  .sidebar-nav {
+    @apply flex-1 p-3 flex flex-col gap-0.5 overflow-y-auto;
+  }
+
+  .sidebar-link {
+    @apply flex items-center gap-3 px-3 py-2 rounded text-muted-foreground text-[0.8125rem] font-medium no-underline transition-all duration-150;
+  }
+
+  .sidebar-link:hover {
+    @apply bg-accent text-foreground;
+  }
+
+  .sidebar-link.active {
+    @apply bg-secondary text-foreground font-semibold;
+  }
+
+  .main-content {
+    @apply flex-1 flex flex-col min-w-0 bg-muted;
+  }
+
+  .top-nav {
+    @apply h-12 border-b border-border px-8 flex items-center justify-between bg-background sticky top-0 z-10;
+  }
+
+  .page-container {
+    @apply p-6 w-full;
+  }
+
+  /* ── Card ──────────────────────────────────────── */
+  .card {
+    @apply bg-card border border-border rounded p-5 shadow-sm;
+  }
+
+  /* ── Stats Grid ───────────────────────────────── */
+  .stats-grid {
+    @apply grid gap-4 mb-6;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  }
+
+  .stat-card {
+    @apply flex flex-col gap-0.5;
+  }
+
+  .stat-label {
+    @apply text-xs font-medium text-muted-foreground uppercase tracking-wider;
+  }
+
+  .stat-value {
+    @apply text-2xl font-bold leading-tight;
+  }
+
+  .stat-description {
+    @apply text-[0.6875rem] text-muted-foreground;
+  }
+
+  /* ── Data Table ───────────────────────────────── */
+  .role-table {
+    @apply w-full text-[0.8125rem];
+    border-collapse: collapse;
+  }
+
+  .role-table thead {
+    @apply bg-muted/40 border-b border-border/40;
+  }
+
+  .role-table th {
+    @apply py-3 px-4 text-left font-medium text-xs tracking-widest text-muted-foreground whitespace-nowrap;
+  }
+
+  .role-table td {
+    @apply py-3 px-4 border-b border-border/40 align-middle text-foreground;
+  }
+
+  .role-table tbody tr {
+    @apply transition-colors duration-150;
+  }
+
+  .role-table tbody tr:last-child td {
+    @apply border-b-0;
+  }
+
+  .role-table tbody tr:hover {
+    @apply bg-muted/30;
+  }
+
+  /* ── Forms ────────────────────────────────────── */
+  .form-group {
+    @apply flex flex-col gap-1;
+  }
+
+  .label {
+    @apply text-[0.8125rem] font-medium text-foreground;
+  }
+
+  .input,
+  select.input,
+  textarea.input {
+    @apply h-9 px-3 rounded border border-input bg-background text-[0.8125rem] text-foreground transition-colors duration-150;
+    font-family: inherit;
+  }
+
+  textarea.input {
+    @apply h-auto min-h-[60px] py-2 px-3 resize-y;
+  }
+
+  .input:focus {
+    @apply outline-none border-ring ring-2;
+    --tw-ring-color: var(--ring);
+    --tw-ring-opacity: 0.1;
+  }
+
+  /* ── Buttons ──────────────────────────────────── */
+  .button {
+    @apply h-9 px-3.5 rounded text-[0.8125rem] font-medium inline-flex items-center justify-center cursor-pointer transition-all duration-150 no-underline border-none whitespace-nowrap gap-1.5;
+    font-family: inherit;
+  }
+
+  .button-primary {
+    @apply bg-primary text-primary-foreground;
+  }
+
+  .button-secondary {
+    @apply bg-background text-secondary-foreground border border-border;
+  }
+
+  .button:hover {
+    @apply opacity-85;
+  }
+
+  .button:disabled {
+    @apply opacity-50 cursor-not-allowed;
+  }
+
+  /* ── Pills / Badges ───────────────────────────── */
+  .pill {
+    @apply px-2 py-0.5 rounded-full text-[0.6875rem] font-medium bg-muted text-muted-foreground inline-flex items-center whitespace-nowrap;
+  }
+
+  .pill-success {
+    @apply bg-green-100 text-green-800;
+  }
+
+  .pill-warning {
+    @apply bg-yellow-100 text-yellow-800;
+  }
+
+  .pill-destructive {
+    @apply bg-red-100 text-red-800;
+  }
+
+  /* ── Loading State ────────────────────────────── */
+  .centered {
+    @apply grid place-items-center min-h-[160px] p-8;
+  }
+}
+
+/* ═══════════════════════════════════════════════════
+   Responsive
+   ═══════════════════════════════════════════════════ */
+@media (max-width: 1024px) {
+  .sidebar {
+    width: 220px;
+  }
+
+  .sidebar-header {
+    @apply p-4 text-[0.9375rem];
+  }
+
+  .page-container {
+    @apply p-6;
+  }
+}
+
+@media (max-width: 768px) {
+  .sidebar {
+    @apply hidden;
+  }
+
+  .page-container {
+    @apply p-4;
+  }
+
+  .stats-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
