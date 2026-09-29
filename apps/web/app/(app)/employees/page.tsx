@@ -18,9 +18,9 @@ export default function EmployeesPage() {
   // Write-back state
   const [writeBackData, setWriteBackData] = useState<{ emp: Employee; writeoffs: WriteOff[] } | null>(null);
 
-  const { selectedBranch, isLoading: tenantLoading } = useTenant();
+  const { selectedBranch, branches, isLoading: tenantLoading } = useTenant();
 
-  useEffect(() => { loadEmployees(); }, [selectedBranch, tenantLoading]);
+  useEffect(() => { loadEmployees(); }, [selectedBranch, branches, tenantLoading]);
 
   async function loadEmployees() {
     if (tenantLoading) return;
@@ -32,9 +32,14 @@ export default function EmployeesPage() {
 
     if (selectedBranch) {
       query = query.eq("branch_id", selectedBranch.id);
+    } else if (branches.length > 0) {
+      query = query.in("branch_id", branches.map((b) => b.id));
     }
 
-    const { data } = await query;
+    const { data, error } = await query;
+    if (error) {
+      console.warn("Failed to load employees:", error.message);
+    }
     if (data) setEmployees(data as Employee[]);
     setLoading(false);
   }

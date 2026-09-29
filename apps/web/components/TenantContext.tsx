@@ -4,8 +4,8 @@ import { createContext, useContext, useState, useEffect, type ReactNode } from "
 import { supabaseBrowser } from "../lib/supabase/client";
 
 export type Organization = { id: string; name: string };
-export type Brand = { id: string; name: string; organization_id: string };
-export type Branch = { id: string; name: string; brand_id: string };
+export type Brand = { id: string; name: string; organization_id: string; code?: string | null };
+export type Branch = { id: string; name: string; brand_id: string; city?: string; state?: string | null };
 
 type TenantContextType = {
     organizations: Organization[];
@@ -38,55 +38,87 @@ export function TenantProvider({ children }: { children: ReactNode }) {
     const fetchHierarchy = async () => {
         setIsLoading(true);
         try {
-            // First, check if the current user profile has a specific branch assigned.
-            // If the user has a specific branch, they are likely a restricted user (e.g., BRANCH_MANAGER).
-            // A SUPER_ADMIN might have branch_id = null or can see everything.
             const { data: { user } } = await supabaseBrowser.auth.getUser();
             if (!user) return;
 
             const { data: profile } = await supabaseBrowser
                 .from("profiles")
-                .select("role, branch_id")
+                .select("role, brand_id, branch_id, brand_ids, branch_ids")
                 .eq("id", user.id)
                 .maybeSingle();
 
-            // Fetch all available orgs, brands, branches (RLS will filter automatically based on roles)
+            const meta = user.user_metadata || {};
+            const userRole = profile?.role || (meta.role as string) || "BRANCH_STAFF";
+            const userBrandId = profile?.brand_id || (meta.brand_id as string) || null;
+            const userBranchId = profile?.branch_id || (meta.branch_id as string) || null;
+
+            const userBrandIds: string[] = Array.isArray(profile?.brand_ids) && profile.brand_ids.length > 0
+                ? profile.brand_ids
+                : Array.isArray(meta.brand_ids) && meta.brand_ids.length > 0
+                ? meta.brand_ids
+                : userBrandId ? [userBrandId] : [];
+
+            const userBranchIds: string[] = Array.isArray(profile?.branch_ids) && profile.branch_ids.length > 0
+                ? profile.branch_ids
+                : Array.isArray(meta.branch_ids) && meta.branch_ids.length > 0
+                ? meta.branch_ids
+                : userBranchId ? [userBranchId] : [];
+
+            // Fetch available orgs, brands, branches
             const { data: orgData } = await supabaseBrowser.from("organizations").select("*").order("name");
             const { data: brandData } = await supabaseBrowser.from("brands").select("*").order("name");
             const { data: branchData } = await supabaseBrowser.from("branches").select("*").order("name");
 
-            setOrganizations(orgData || []);
-            setBrands(brandData || []);
+            const allOrgs = orgData || [];
+            let availableBrands = brandData || [];
+            let availableBranches = branchData || [];
 
-            const availableBranches = branchData || [];
+            // Scope based on RBAC rules:
+            if (userRole === "BRAND_ADMIN") {
+                if (userBrandIds.length > 0) {
+                    availableBrands = availableBrands.filter((b) => userBrandIds.includes(b.id));
+                    availableBranches = availableBranches.filter((br) => userBrandIds.includes(br.brand_id));
+                }
+            } else if (userRole === "BRANCH_ADMIN" || userRole === "BRANCH_MANAGER" || userRole === "BRANCH_STAFF" || userRole === "MANAGER") {
+                if (userBranchIds.length > 0) {
+                    availableBranches = availableBranches.filter((br) => userBranchIds.includes(br.id));
+                    availableBrands = availableBrands.filter((b) => availableBranches.some((br) => br.brand_id === b.id));
+                } else if (userBrandIds.length > 0) {
+                    availableBrands = availableBrands.filter((b) => userBrandIds.includes(b.id));
+                    availableBranches = availableBranches.filter((br) => userBrandIds.includes(br.brand_id));
+                }
+            }
+
+            setOrganizations(allOrgs);
+            setBrands(availableBrands);
             setBranches(availableBranches);
 
             // Restore from localStorage or pick defaults
             const savedBranchId = localStorage.getItem("selectedBranchId");
 
             let initialBranch = null;
-            if (profile?.branch_id) {
-                // If the profile restricts to a specific branch, force it.
-                initialBranch = availableBranches.find(b => b.id === profile.branch_id) || null;
-            } else if (savedBranchId) {
-                initialBranch = availableBranches.find(b => b.id === savedBranchId) || null;
+            if (savedBranchId && availableBranches.some((b) => b.id === savedBranchId)) {
+                initialBranch = availableBranches.find((b) => b.id === savedBranchId) || availableBranches[0] || null;
             } else if (availableBranches.length > 0) {
                 initialBranch = availableBranches[0];
             }
 
             if (initialBranch) {
                 setSelectedBranchState(initialBranch);
+                localStorage.setItem("selectedBranchId", initialBranch.id);
 
-                // Infer brand and org from the selected branch
-                const parentBrand = (brandData || []).find(b => b.id === initialBranch.brand_id) || null;
+                const parentBrand = (brandData || []).find((b) => b.id === initialBranch.brand_id) || null;
                 setSelectedBrandState(parentBrand);
 
                 if (parentBrand) {
-                    const parentOrg = (orgData || []).find(o => o.id === parentBrand.organization_id) || null;
+                    const parentOrg = (allOrgs || []).find((o) => o.id === parentBrand.organization_id) || null;
                     setSelectedOrgState(parentOrg);
                 }
+            } else if (availableBrands.length > 0) {
+                setSelectedBrandState(availableBrands[0]);
+                const parentOrg = (allOrgs || []).find((o) => o.id === availableBrands[0].organization_id) || null;
+                setSelectedOrgState(parentOrg);
             }
-
         } catch (err) {
             console.error("Failed to fetch tenant hierarchy:", err);
         } finally {
@@ -103,7 +135,7 @@ export function TenantProvider({ children }: { children: ReactNode }) {
         if (branch) {
             localStorage.setItem("selectedBranchId", branch.id);
 
-            const parentBrand = brands.find(b => b.id === branch.brand_id) || null;
+            const parentBrand = brands.find((b) => b.id === branch.brand_id) || null;
             handleSetSelectedBrand(parentBrand);
         } else {
             localStorage.removeItem("selectedBranchId");
@@ -113,18 +145,14 @@ export function TenantProvider({ children }: { children: ReactNode }) {
     const handleSetSelectedBrand = (brand: Brand | null) => {
         setSelectedBrandState(brand);
         if (brand) {
-            const parentOrg = organizations.find(o => o.id === brand.organization_id) || null;
+            const parentOrg = organizations.find((o) => o.id === brand.organization_id) || null;
             setSelectedOrgState(parentOrg);
 
             // Auto-select first branch of this brand if the current branch doesn't belong to it
             if (!selectedBranch || selectedBranch.brand_id !== brand.id) {
-                const firstBranch = branches.find(b => b.brand_id === brand.id);
-                if (firstBranch) {
-                    setSelectedBranchState(firstBranch);
-                    localStorage.setItem("selectedBranchId", firstBranch.id);
-                } else {
-                    setSelectedBranchState(null);
-                    localStorage.removeItem("selectedBranchId");
+                const firstBranchOfBrand = branches.find((b) => b.brand_id === brand.id);
+                if (firstBranchOfBrand) {
+                    handleSetSelectedBranch(firstBranchOfBrand);
                 }
             }
         }
@@ -133,27 +161,31 @@ export function TenantProvider({ children }: { children: ReactNode }) {
     const handleSetSelectedOrg = (org: Organization | null) => {
         setSelectedOrgState(org);
         if (org) {
-            // Auto-select first brand
-            const firstBrand = brands.find(b => b.organization_id === org.id);
-            if (firstBrand) {
-                handleSetSelectedBrand(firstBrand);
-            } else {
-                setSelectedBrandState(null);
-                setSelectedBranchState(null);
-                localStorage.removeItem("selectedBranchId");
+            // Auto-select first brand of this org if the current brand doesn't belong to it
+            if (!selectedBrand || selectedBrand.organization_id !== org.id) {
+                const firstBrandOfOrg = brands.find((b) => b.organization_id === org.id);
+                if (firstBrandOfOrg) {
+                    handleSetSelectedBrand(firstBrandOfOrg);
+                }
             }
         }
     };
 
     return (
-        <TenantContext.Provider value={{
-            organizations, brands, branches,
-            selectedOrg, selectedBrand, selectedBranch,
-            setSelectedOrg: handleSetSelectedOrg,
-            setSelectedBrand: handleSetSelectedBrand,
-            setSelectedBranch: handleSetSelectedBranch,
-            isLoading
-        }}>
+        <TenantContext.Provider
+            value={{
+                organizations,
+                brands,
+                branches,
+                selectedOrg,
+                selectedBrand,
+                selectedBranch,
+                setSelectedOrg: handleSetSelectedOrg,
+                setSelectedBrand: handleSetSelectedBrand,
+                setSelectedBranch: handleSetSelectedBranch,
+                isLoading,
+            }}
+        >
             {children}
         </TenantContext.Provider>
     );
@@ -161,7 +193,7 @@ export function TenantProvider({ children }: { children: ReactNode }) {
 
 export function useTenant() {
     const context = useContext(TenantContext);
-    if (context === undefined) {
+    if (!context) {
         throw new Error("useTenant must be used within a TenantProvider");
     }
     return context;

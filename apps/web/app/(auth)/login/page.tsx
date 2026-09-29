@@ -17,36 +17,55 @@ export default function LoginPage() {
     setError(null);
     setLoading(true);
 
-    const { error: signInError } = await supabaseBrowser.auth.signInWithPassword({
-      email,
-      password
-    });
+    try {
+      const { error: signInError } = await supabaseBrowser.auth.signInWithPassword({
+        email,
+        password,
+      });
 
-    if (signInError) {
+      if (signInError) {
+        setLoading(false);
+        setError(signInError.message);
+        return;
+      }
+
+      router.refresh();
+      router.replace("/select-brand");
+    } catch (err: any) {
+      setError(err?.message || "Authentication failed");
       setLoading(false);
-      setError(signInError.message);
-      return;
     }
-
-    // Refresh server-side session so middleware picks up the new auth cookies
-    router.refresh();
-    router.replace("/select-brand");
   }
 
   return (
     <main className="min-h-screen grid place-items-center bg-muted p-4">
-      <div className="card w-full max-w-[400px] p-10">
-        <div className="flex flex-col items-center mb-8 text-center">
-          <div className="w-12 h-12 bg-primary rounded mb-4" />
-          <h1>Welcome Back</h1>
-          <p className="text-muted-foreground">Sign in to manage your operations</p>
+      <div className="card w-full max-w-[400px] p-8 sm:p-10 shadow-xl border border-border bg-card">
+        {/* Header */}
+        <div className="flex flex-col items-center mb-6 text-center">
+          <div className="w-12 h-12 bg-primary text-primary-foreground rounded-xl grid place-items-center text-xl font-bold mb-3 shadow-sm">
+            🏢
+          </div>
+          <h1 className="text-xl font-bold text-foreground">
+            Sign In
+          </h1>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Sign in to manage attendance & payroll operations
+          </p>
         </div>
 
-        <form onSubmit={onSubmit} className="flex flex-col gap-4">
+        {/* Feedback Alert */}
+        {error && (
+          <div className="p-3 bg-red-50 dark:bg-red-950/50 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-900 rounded-md text-xs mb-4">
+            ⚠️ {error}
+          </div>
+        )}
+
+        {/* Form */}
+        <form onSubmit={onSubmit} className="flex flex-col gap-3.5">
           <div className="form-group">
-            <label className="label">Email Address</label>
+            <label className="label text-xs">Email Address</label>
             <input
-              className="input"
+              className="input text-xs"
               type="email"
               required
               placeholder="name@company.com"
@@ -54,10 +73,11 @@ export default function LoginPage() {
               onChange={(event) => setEmail(event.target.value)}
             />
           </div>
+
           <div className="form-group">
-            <label className="label">Password</label>
+            <label className="label text-xs">Password</label>
             <input
-              className="input"
+              className="input text-xs"
               type="password"
               required
               placeholder="••••••••"
@@ -66,19 +86,20 @@ export default function LoginPage() {
             />
           </div>
 
-          {error && (
-            <div className="p-3 bg-red-100 text-red-800 rounded text-sm">
-              {error}
-            </div>
-          )}
-
-          <button className="button button-primary w-full mt-4" type="submit" disabled={loading}>
+          <button
+            className="button button-primary w-full mt-2 font-bold text-xs h-9 cursor-pointer"
+            type="submit"
+            disabled={loading}
+          >
             {loading ? "Signing in..." : "Sign In"}
           </button>
         </form>
 
-        <div className="mt-8 text-center">
-          <Link href="/" className="text-muted-foreground text-sm no-underline hover:text-foreground transition-colors">
+        <div className="mt-6 text-center">
+          <Link
+            href="/"
+            className="text-muted-foreground text-xs no-underline hover:text-foreground transition-colors"
+          >
             ← Back to Home
           </Link>
         </div>

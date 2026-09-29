@@ -1,11 +1,14 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import Link from "next/link";
 import { supabaseBrowser } from "../../../lib/supabase/client";
 import { useTenant } from "../../../components/TenantContext";
+import { useAuth } from "../../../components/AuthGate";
 import type { Loan, Employee, RepaymentEntry, LoanType, LoanStatus } from "../../../lib/types";
 
 export default function LoansPage() {
+    const { role } = useAuth();
     const [employees, setEmployees] = useState<Pick<Employee, "id" | "full_name">[]>([]);
     const [loans, setLoans] = useState<Loan[]>([]);
     const [loading, setLoading] = useState(true);
@@ -32,6 +35,23 @@ export default function LoansPage() {
     const [schedule, setSchedule] = useState<RepaymentEntry[]>([]);
 
     const { selectedBranch: globalBranch, isLoading: tenantLoading } = useTenant();
+
+    if (role && ["MANAGER", "BRANCH_STAFF", "EMPLOYEE"].includes(role)) {
+        return (
+            <div className="card max-w-lg mx-auto my-12 p-8 text-center space-y-3">
+                <span className="text-4xl block">🔒</span>
+                <h2 className="text-base font-bold text-foreground">Access Restricted</h2>
+                <p className="text-xs text-muted-foreground">
+                    Your role (<strong>{role}</strong>) does not have permission to view Loans & Advances.
+                </p>
+                <div className="pt-2">
+                    <Link href="/attendance" className="button button-primary text-xs">
+                        ← Back to Attendance
+                    </Link>
+                </div>
+            </div>
+        );
+    }
 
     async function loadData() {
         if (tenantLoading) return;

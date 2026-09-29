@@ -102,32 +102,47 @@ interface PunchSessionItem {
     const endIST = `${year}-${pad(month + 1)}-${pad(lastDay)}T23:59:59+05:30`;
 
     let empQuery = supabaseBrowser.from("employees").select("id, full_name, branch_id, branches(name)").eq("status", "ACTIVE");
+    if (globalBranch) {
+      empQuery = empQuery.eq("branch_id", globalBranch.id);
+    }
+
+    const [emps, branchRes] = await Promise.all([
+      empQuery,
+      supabaseBrowser.from("branches").select("id, name"),
+    ]);
+
+    const activeEmployees = (emps.data || []) as unknown as typeof employees;
+    const empIds = activeEmployees.map((e) => e.id);
+
     let logsQuery = supabaseBrowser
       .from("attendance_logs")
       .select("id, employee_id, check_in, check_out, status, source, metadata")
       .gte("check_in", startIST)
       .lte("check_in", endIST);
+
+    if (globalBranch && empIds.length > 0) {
+      logsQuery = logsQuery.in("employee_id", empIds);
+    } else if (globalBranch) {
+      logsQuery = logsQuery.eq("branch_id", globalBranch.id);
+    }
+
     let leavesQuery = supabaseBrowser
       .from("leave_requests")
-      .select("id, employee_id, start_date, end_date, status, employees!inner(branch_id)")
+      .select("id, employee_id, start_date, end_date, status")
       .in("status", ["APPROVED", "PENDING"])
       .gte("start_date", `${year}-${pad(month + 1)}-01`)
       .lte("end_date", `${year}-${pad(month + 1)}-${pad(lastDay)}`);
 
-    if (globalBranch) {
-      empQuery = empQuery.eq("branch_id", globalBranch.id);
-      logsQuery = logsQuery.eq("branch_id", globalBranch.id);
-      leavesQuery = leavesQuery.eq("employees.branch_id", globalBranch.id);
+    if (empIds.length > 0) {
+      leavesQuery = leavesQuery.in("employee_id", empIds);
     }
 
-    const [emps, syncLogs, branchRes, leavesRes] = await Promise.all([
-      empQuery,
+    const [syncLogs, leavesRes] = await Promise.all([
       logsQuery,
-      supabaseBrowser.from("branches").select("id, name"),
       leavesQuery,
     ]);
 
-    setEmployees((emps.data || []) as unknown as typeof employees);
+    setEmployees(activeEmployees);
     setLogs((syncLogs.data || []) as unknown as typeof logs);
     setBranches((branchRes.data || []) as unknown as typeof branches);
     setLeaveRequests((leavesRes.data || []) as unknown as typeof leaveRequests);

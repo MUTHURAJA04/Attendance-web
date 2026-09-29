@@ -1,8 +1,12 @@
 export declare const ROLE_LABELS: {
     readonly SUPER_ADMIN: "Super Admin";
+    readonly BRAND_ADMIN: "Brand Admin";
+    readonly BRANCH_ADMIN: "Branch Admin";
+    readonly MANAGER: "Manager";
+    readonly BRANCH_STAFF: "Branch Staff";
     readonly BRANCH_MANAGER: "Branch Manager";
-    readonly EMPLOYEE: "Employee";
     readonly PAYROLL_MANAGER: "Payroll Manager";
+    readonly EMPLOYEE: "Employee";
 };
 export type Role = keyof typeof ROLE_LABELS;
 export declare const ATTENDANCE_STATES: readonly ["PRESENT", "ABSENT", "HALF_DAY", "LATE_MARK", "OVERTIME", "LEAVE_APPROVED", "LEAVE_UNAPPROVED"];
@@ -25,6 +29,8 @@ export type EmployeeCreateInput = {
     role: EmployeeRole;
     branchId: string;
     dateOfJoining: string;
+    dateOfBirth?: string;
+    gender?: "MALE" | "FEMALE" | "OTHER";
     phone: string;
     address?: string;
     emergencyContactName: string;

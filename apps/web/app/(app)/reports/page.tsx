@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { supabaseBrowser } from "../../../lib/supabase/client";
+import { useAuth } from "../../../components/AuthGate";
 
 interface ReportStats {
     totalEmployees: number;
@@ -18,8 +19,26 @@ interface ReportStats {
 }
 
 export default function ReportsPage() {
+    const { role } = useAuth();
     const [stats, setStats] = useState<ReportStats | null>(null);
     const [loading, setLoading] = useState(true);
+
+    if (role && ["MANAGER", "BRANCH_STAFF", "EMPLOYEE"].includes(role)) {
+        return (
+            <div className="card max-w-lg mx-auto my-12 p-8 text-center space-y-3">
+                <span className="text-4xl block">🔒</span>
+                <h2 className="text-base font-bold text-foreground">Access Restricted</h2>
+                <p className="text-xs text-muted-foreground">
+                    Your role (<strong>{role}</strong>) does not have permission to view Financial & Payroll Reports.
+                </p>
+                <div className="pt-2">
+                    <Link href="/attendance" className="button button-primary text-xs">
+                        ← Back to Attendance
+                    </Link>
+                </div>
+            </div>
+        );
+    }
 
     useEffect(() => {
         async function loadStats() {

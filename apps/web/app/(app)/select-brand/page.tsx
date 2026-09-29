@@ -11,7 +11,7 @@ type BranchItem = Branch & { city?: string; state?: string | null };
 
 export default function SelectBrandPage() {
   const router = useRouter();
-  const { role, email } = useAuth();
+  const { role, email, brandId: userBrandId, branchId: userBranchId, brandIds = [], branchIds = [], loading: authLoading } = useAuth();
   const { setSelectedBranch, setSelectedBrand } = useTenant();
 
   const [brands, setBrands] = useState<BrandItem[]>([]);
@@ -20,7 +20,7 @@ export default function SelectBrandPage() {
   const [loading, setLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // New Brand / Branch Modal states (for Super Admin)
+  // New Brand / Branch Modal states
   const [showNewBrandModal, setShowNewBrandModal] = useState(false);
   const [showNewBranchModal, setShowNewBranchModal] = useState(false);
   const [newBrandName, setNewBrandName] = useState("");
@@ -28,22 +28,51 @@ export default function SelectBrandPage() {
   const [newBranchName, setNewBranchName] = useState("");
   const [newBranchCity, setNewBranchCity] = useState("Chennai");
 
+  const isSuperAdmin = role === "SUPER_ADMIN";
+  const isBrandAdmin = role === "BRAND_ADMIN";
+  const isBranchScoped = role === "BRANCH_ADMIN" || role === "BRANCH_MANAGER" || role === "MANAGER" || role === "BRANCH_STAFF";
+
+  const effectiveBrandIds = brandIds.length > 0 ? brandIds : userBrandId ? [userBrandId] : [];
+  const effectiveBranchIds = branchIds.length > 0 ? branchIds : userBranchId ? [userBranchId] : [];
+
   const loadData = async () => {
     try {
       setLoading(true);
+
       const [brandRes, branchRes] = await Promise.all([
         supabaseBrowser.from("brands").select("*").order("name"),
         supabaseBrowser.from("branches").select("*").order("name"),
       ]);
 
-      const brandList = (brandRes.data || []) as BrandItem[];
-      const branchList = (branchRes.data || []) as BranchItem[];
+      let brandList = (brandRes.data || []) as BrandItem[];
+      let branchList = (branchRes.data || []) as BranchItem[];
+
+      // Scope brands and branches based on user assignments
+      if (isBrandAdmin && effectiveBrandIds.length > 0) {
+        brandList = brandList.filter((b) => effectiveBrandIds.includes(b.id));
+        branchList = branchList.filter((br) => effectiveBrandIds.includes(br.brand_id));
+      } else if (isBranchScoped && effectiveBranchIds.length > 0) {
+        branchList = branchList.filter((br) => effectiveBranchIds.includes(br.id));
+        brandList = brandList.filter((b) => branchList.some((br) => br.brand_id === b.id));
+      }
 
       setBrands(brandList);
       setBranches(branchList);
 
+      // Single-branch assigned users -> Direct auto-entry to Dashboard
+      if (isBranchScoped && branchList.length === 1) {
+        handleSelectWorkspace(branchList[0], brandList);
+        return;
+      }
+
       if (brandList.length > 0) {
-        setSelectedBrandId(brandList[0].id);
+        if (selectedBrandId && brandList.some((b) => b.id === selectedBrandId)) {
+          // keep current
+        } else if (effectiveBrandIds.length > 0 && brandList.some((b) => b.id === effectiveBrandIds[0])) {
+          setSelectedBrandId(effectiveBrandIds[0]);
+        } else {
+          setSelectedBrandId(brandList[0].id);
+        }
       }
     } catch (err) {
       console.error("Error loading brands and branches:", err);
@@ -53,11 +82,13 @@ export default function SelectBrandPage() {
   };
 
   useEffect(() => {
-    loadData();
-  }, []);
+    if (!authLoading) {
+      loadData();
+    }
+  }, [authLoading, role, userBrandId, userBranchId, brandIds, branchIds]);
 
-  const handleSelectWorkspace = (branch: BranchItem) => {
-    const parentBrand = brands.find((b) => b.id === branch.brand_id) || null;
+  const handleSelectWorkspace = (branch: BranchItem, currentBrands = brands) => {
+    const parentBrand = currentBrands.find((b) => b.id === branch.brand_id) || null;
     if (parentBrand) {
       setSelectedBrand(parentBrand);
     }
@@ -136,12 +167,12 @@ export default function SelectBrandPage() {
   const activeBrand = brands.find((b) => b.id === selectedBrandId) || brands[0];
   const brandBranches = branches.filter((b) => b.brand_id === activeBrand?.id);
 
-  if (loading) {
+  if (loading || authLoading) {
     return (
       <main className="min-h-screen grid place-items-center bg-muted/40 p-4">
         <div className="card p-8 text-center space-y-3">
           <div className="w-10 h-10 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto" />
-          <p className="text-sm text-muted-foreground font-medium">Loading your brands & workspaces...</p>
+          <p className="text-sm text-muted-foreground font-medium">Loading your workspaces & permissions...</p>
         </div>
       </main>
     );
@@ -154,12 +185,12 @@ export default function SelectBrandPage() {
         <div className="flex justify-between items-center mb-8 pb-6 border-b border-border">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-primary text-primary-foreground font-extrabold grid place-items-center text-lg shadow-md">
-              A
+              🏢
             </div>
             <div>
               <h1 className="text-xl font-bold">Attendance & Payroll Suite</h1>
               <p className="text-xs text-muted-foreground">
-                Signed in as <span className="font-semibold text-foreground">{email}</span> ({role || "Staff"})
+                Signed in as <span className="font-semibold text-foreground">{email}</span> ({role?.replace("_", " ") || "Staff"})
               </p>
             </div>
           </div>
@@ -183,13 +214,13 @@ export default function SelectBrandPage() {
             </p>
           </div>
 
-          {/* 1. Brand Selection Strip */}
+          {/* 1. Brand Selection Strip (Visible to Super Admin and Brand Admin) */}
           <div>
             <div className="flex justify-between items-center mb-3">
               <label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
                 1. Select Brand ({brands.length})
               </label>
-              {(role === "SUPER_ADMIN" || !role) && (
+              {(isSuperAdmin || isBrandAdmin) && (
                 <button
                   type="button"
                   className="text-xs text-primary hover:underline font-semibold"
@@ -203,13 +234,15 @@ export default function SelectBrandPage() {
             {brands.length === 0 ? (
               <div className="card p-6 text-center border-dashed">
                 <p className="text-muted-foreground text-sm">No brands found.</p>
-                <button
-                  type="button"
-                  className="button button-primary text-xs mt-3"
-                  onClick={() => setShowNewBrandModal(true)}
-                >
-                  + Create First Brand
-                </button>
+                {(isSuperAdmin || isBrandAdmin) && (
+                  <button
+                    type="button"
+                    className="button button-primary text-xs mt-3"
+                    onClick={() => setShowNewBrandModal(true)}
+                  >
+                    + Create First Brand
+                  </button>
+                )}
               </div>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
@@ -264,7 +297,7 @@ export default function SelectBrandPage() {
                 <label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
                   2. Select Branch for <span className="text-foreground">{activeBrand.name}</span> ({brandBranches.length})
                 </label>
-                {(role === "SUPER_ADMIN" || !role) && (
+                {(isSuperAdmin || isBrandAdmin) && (
                   <button
                     type="button"
                     className="text-xs text-primary hover:underline font-semibold"
@@ -278,17 +311,19 @@ export default function SelectBrandPage() {
               {brandBranches.length === 0 ? (
                 <div className="card p-8 text-center border-dashed">
                   <span className="text-3xl block mb-2">🏢</span>
-                  <h4 className="font-bold text-base">No branches created for this brand yet</h4>
+                  <h4 className="font-bold text-base">No branches created for {activeBrand.name} yet</h4>
                   <p className="text-xs text-muted-foreground mt-1 max-w-sm mx-auto">
-                    Add your first physical branch location (e.g. Main Branch, Kitchen Center) to begin tracking attendance.
+                    Add a physical branch location (e.g. Main Branch, Express Kitchen) to begin tracking attendance.
                   </p>
-                  <button
-                    type="button"
-                    className="button button-primary text-xs mt-4"
-                    onClick={() => setShowNewBranchModal(true)}
-                  >
-                    + Add Branch to {activeBrand.name}
-                  </button>
+                  {(isSuperAdmin || isBrandAdmin) && (
+                    <button
+                      type="button"
+                      className="button button-primary text-xs mt-4"
+                      onClick={() => setShowNewBranchModal(true)}
+                    >
+                      + Add Branch to {activeBrand.name}
+                    </button>
+                  )}
                 </div>
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
@@ -332,7 +367,7 @@ export default function SelectBrandPage() {
       </footer>
 
       {/* New Brand Modal */}
-      {showNewBrandModal && (
+      {showNewBrandModal && (isSuperAdmin || isBrandAdmin) && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-xs grid place-items-center z-50 p-4" onClick={() => setShowNewBrandModal(false)}>
           <div className="card w-full max-w-[420px] p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-lg font-bold">Create New Brand</h3>
@@ -386,7 +421,7 @@ export default function SelectBrandPage() {
       )}
 
       {/* New Branch Modal */}
-      {showNewBranchModal && (
+      {showNewBranchModal && (isSuperAdmin || isBrandAdmin) && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-xs grid place-items-center z-50 p-4" onClick={() => setShowNewBranchModal(false)}>
           <div className="card w-full max-w-[420px] p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-lg font-bold">Add Branch to {activeBrand?.name}</h3>

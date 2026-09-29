@@ -5,12 +5,14 @@ import Link from "next/link";
 import { supabaseBrowser } from "../../../lib/supabase/client";
 import { callEdgeFunction } from "../../../lib/supabase/edge";
 import { useTenant } from "../../../components/TenantContext";
+import { useAuth } from "../../../components/AuthGate";
 import { logAudit } from "../../../lib/audit";
 import { PayslipModal } from "../../../components/PayslipModal";
 
 import type { Payslip, PayrollPeriod } from "../../../lib/types";
 
 export default function PayrollPage() {
+    const { role } = useAuth();
     const [isProcessing, setIsProcessing] = useState(false);
     const [period, setPeriod] = useState<PayrollPeriod | null>(null);
     const [payslips, setPayslips] = useState<Payslip[]>([]);
@@ -25,6 +27,24 @@ export default function PayrollPage() {
     const [selectedSlip, setSelectedSlip] = useState<Payslip | null>(null);
 
     const { selectedBranch: globalBranch, isLoading: tenantLoading } = useTenant();
+
+    // Restricted Access for Manager and Branch Staff
+    if (role && ["MANAGER", "BRANCH_STAFF", "EMPLOYEE"].includes(role)) {
+        return (
+            <div className="card max-w-lg mx-auto my-12 p-8 text-center space-y-3">
+                <span className="text-4xl block">🔒</span>
+                <h2 className="text-base font-bold text-foreground">Access Restricted</h2>
+                <p className="text-xs text-muted-foreground">
+                    Your role (<strong>{role}</strong>) is strictly restricted from viewing or managing Payroll and Salary data.
+                </p>
+                <div className="pt-2">
+                    <Link href="/attendance" className="button button-primary text-xs">
+                        ← Back to Attendance
+                    </Link>
+                </div>
+            </div>
+        );
+    }
 
     async function loadPayrollData() {
         if (tenantLoading) return;

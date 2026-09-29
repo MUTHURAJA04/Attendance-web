@@ -49,18 +49,25 @@ export default function DailyAttendancePage() {
     const endIST = `${dateParam}T23:59:59+05:30`;
 
     let empQuery = supabaseBrowser.from("employees").select("id, full_name").eq("status", "ACTIVE");
-    let logsQuery = supabaseBrowser.from("attendance_logs").select("id, employee_id, check_in, check_out, status, metadata").gte("check_in", startIST).lte("check_in", endIST).order("check_in", { ascending: true });
-    let leavesQuery = supabaseBrowser.from("leave_requests").select("id, employee_id, start_date, end_date, status, employees!inner(branch_id)").in("status", ["APPROVED", "PENDING"]).lte("start_date", dateParam).gte("end_date", dateParam);
-
     if (globalBranch) {
       empQuery = empQuery.eq("branch_id", globalBranch.id);
-      logsQuery = logsQuery.eq("branch_id", globalBranch.id);
-      leavesQuery = leavesQuery.eq("employees.branch_id", globalBranch.id);
     }
 
-    const [empRes, logsRes, leavesRes] = await Promise.all([empQuery, logsQuery, leavesQuery]);
-    
+    const empRes = await empQuery;
     const empData = empRes.data || [];
+    const empIds = empData.map((e) => e.id);
+
+    let logsQuery = supabaseBrowser.from("attendance_logs").select("id, employee_id, check_in, check_out, status, metadata").gte("check_in", startIST).lte("check_in", endIST).order("check_in", { ascending: true });
+    let leavesQuery = supabaseBrowser.from("leave_requests").select("id, employee_id, start_date, end_date, status").in("status", ["APPROVED", "PENDING"]).lte("start_date", dateParam).gte("end_date", dateParam);
+
+    if (globalBranch && empIds.length > 0) {
+      logsQuery = logsQuery.in("employee_id", empIds);
+      leavesQuery = leavesQuery.in("employee_id", empIds);
+    } else if (globalBranch) {
+      logsQuery = logsQuery.eq("branch_id", globalBranch.id);
+    }
+
+    const [logsRes, leavesRes] = await Promise.all([logsQuery, leavesQuery]);
     const logData = logsRes.data || [];
     const leaveData = leavesRes.data || [];
 
