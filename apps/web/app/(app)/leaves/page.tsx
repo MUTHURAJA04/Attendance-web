@@ -5,13 +5,53 @@ import { supabaseBrowser } from "../../../lib/supabase/client";
 import { useTenant } from "../../../components/TenantContext";
 import type { LeaveRequest, LeaveType, Employee } from "../../../lib/types";
 
+type EmployeeWithShift = Pick<
+    Employee,
+    "id" | "full_name" | "branch_id" | "shift_start" | "shift_end" | "shift_type" | "role" | "employee_code"
+>;
+
+// Helper to get current Date & Time in IST (Asia/Kolkata)
+const getISTNow = () => {
+    const now = new Date();
+    const dateStr = new Intl.DateTimeFormat("en-CA", {
+        timeZone: "Asia/Kolkata",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+    }).format(now); // "YYYY-MM-DD"
+
+    const timeStr = new Intl.DateTimeFormat("en-GB", {
+        timeZone: "Asia/Kolkata",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+    }).format(now); // "HH:MM"
+
+    return { todayIST: dateStr, currentISTTime: timeStr };
+};
+
+// Helper to format HH:MM or HH:MM:SS into 12-hour AM/PM
+const format12Hour = (timeStr?: string | null) => {
+    if (!timeStr) return "10:00 AM";
+    try {
+        const [hStr, mStr] = timeStr.split(":");
+        let h = parseInt(hStr, 10);
+        const m = mStr || "00";
+        const ampm = h >= 12 ? "PM" : "AM";
+        h = h % 12 || 12;
+        return `${h}:${m} ${ampm}`;
+    } catch {
+        return timeStr;
+    }
+};
+
 export default function LeavesPage() {
     const now = new Date();
     const [month, setMonth] = useState(now.getMonth());
     const [year, setYear] = useState(now.getFullYear());
 
     const [leaves, setLeaves] = useState<LeaveRequest[]>([]);
-    const [employees, setEmployees] = useState<Pick<Employee, "id" | "full_name">[]>([]);
+    const [employees, setEmployees] = useState<EmployeeWithShift[]>([]);
     const [loading, setLoading] = useState(true);
     const [showApply, setShowApply] = useState(false);
     const [showEdit, setShowEdit] = useState<string | null>(null);
@@ -44,7 +84,10 @@ export default function LeavesPage() {
             .gte("end_date", startStr)
             .order("created_at", { ascending: false });
             
-        let empQuery = supabaseBrowser.from("employees").select("id, full_name, branch_id").eq("status", "ACTIVE");
+        let empQuery = supabaseBrowser
+            .from("employees")
+            .select("id, full_name, branch_id, shift_start, shift_end, shift_type, role, employee_code")
+            .eq("status", "ACTIVE");
 
         if (globalBranch) {
             leaveQuery = leaveQuery.eq("employees.branch_id", globalBranch.id);
@@ -56,13 +99,50 @@ export default function LeavesPage() {
             empQuery,
         ]);
         setLeaves((leavesRes.data as LeaveRequest[]) || []);
-        setEmployees((empsRes.data as Pick<Employee, "id" | "full_name">[]) || []);
+        setEmployees((empsRes.data as EmployeeWithShift[]) || []);
         setLoading(false);
     }
 
     useEffect(() => {
         loadLeaves();
     }, [globalBranch, tenantLoading, month, year]);
+
+    // Validation: check if employee shift has already started
+    const validateShiftForLeave = (
+        employeeId: string,
+        startDate: string,
+        endDate: string
+    ): { valid: boolean; error?: string; shiftStartStr?: string } => {
+        const emp = employees.find((e) => e.id === employeeId);
+        if (!emp) return { valid: true };
+
+        const { todayIST, currentISTTime } = getISTNow();
+        const shiftStart = emp.shift_start ? emp.shift_start.substring(0, 5) : "10:00";
+        const shiftStart12 = format12Hour(shiftStart);
+        const current12 = format12Hour(currentISTTime);
+
+        // 1. If start date is in the past
+        if (startDate < todayIST) {
+            return {
+                valid: false,
+                error: `Cannot apply leave for past date (${startDate}). Leave must be applied before shift starts.`,
+                shiftStartStr: shiftStart12,
+            };
+        }
+
+        // 2. If leave covers today, check if current time is past shift start
+        if (startDate <= todayIST && endDate >= todayIST) {
+            if (currentISTTime >= shiftStart) {
+                return {
+                    valid: false,
+                    error: `Shift already started! ${emp.full_name}'s shift began at ${shiftStart12} today (Current IST time is ${current12}). Leave cannot be applied once the shift has started.`,
+                    shiftStartStr: shiftStart12,
+                };
+            }
+        }
+
+        return { valid: true, shiftStartStr: shiftStart12 };
+    };
 
     const handleAction = (id: string, status: "APPROVED" | "REJECTED" | "DELETE") => {
         setConfirmAction({ id, status });
@@ -87,6 +167,13 @@ export default function LeavesPage() {
         e.preventDefault();
         if (!form.employee_id) { alert("Select an employee."); return; }
         if (new Date(form.end_date) < new Date(form.start_date)) { alert("End date must be after start date."); return; }
+
+        // Enforce Shift Start Rule
+        const shiftValidation = validateShiftForLeave(form.employee_id, form.start_date, form.end_date);
+        if (!shiftValidation.valid) {
+            alert(shiftValidation.error);
+            return;
+        }
 
         const { error } = await supabaseBrowser.from("leave_requests").insert([{
             employee_id: form.employee_id,
@@ -121,6 +208,13 @@ export default function LeavesPage() {
         e.preventDefault();
         if (new Date(form.end_date) < new Date(form.start_date)) { alert("End date must be after start date."); return; }
         
+        // Enforce Shift Start Rule
+        const shiftValidation = validateShiftForLeave(form.employee_id, form.start_date, form.end_date);
+        if (!shiftValidation.valid) {
+            alert(shiftValidation.error);
+            return;
+        }
+
         const { error } = await supabaseBrowser.from("leave_requests").update({
             type: form.type,
             start_date: form.start_date,
@@ -240,16 +334,69 @@ export default function LeavesPage() {
             {/* Apply Leave Modal */}
             {showApply && (
                 <div className="fixed inset-0 bg-black/50 grid place-items-center z-50 p-4">
-                    <div className="card w-full max-w-[450px]">
+                    <div className="card w-full max-w-[460px]">
                         <h2 className="text-xl">Apply for Leave</h2>
                         <form onSubmit={handleApply} className="mt-4 flex flex-col gap-4">
                             <div className="form-group">
                                 <label className="label">Employee</label>
                                 <select className="input" required value={form.employee_id} onChange={(e) => setForm({ ...form, employee_id: e.target.value })}>
                                     <option value="">Select Employee</option>
-                                    {employees.map((emp) => <option key={emp.id} value={emp.id}>{emp.full_name}</option>)}
+                                    {employees.map((emp) => (
+                                        <option key={emp.id} value={emp.id}>
+                                            {emp.full_name} ({emp.role || "Staff"} • {format12Hour(emp.shift_start)})
+                                        </option>
+                                    ))}
                                 </select>
                             </div>
+
+                            {/* Shift Timing & Status Banner */}
+                            {form.employee_id && (() => {
+                                const selectedEmp = employees.find((e) => e.id === form.employee_id);
+                                if (!selectedEmp) return null;
+                                const { todayIST, currentISTTime } = getISTNow();
+                                const shiftStart = selectedEmp.shift_start ? selectedEmp.shift_start.substring(0, 5) : "10:00";
+                                const shiftEnd = selectedEmp.shift_end ? selectedEmp.shift_end.substring(0, 5) : "22:00";
+                                const isTodayCovered = form.start_date <= todayIST && form.end_date >= todayIST;
+                                const isPastStart = form.start_date < todayIST;
+                                const isShiftStarted = isTodayCovered && currentISTTime >= shiftStart;
+                                const isBlocked = isShiftStarted || isPastStart;
+
+                                return (
+                                    <div className={`p-3 rounded-lg border text-xs flex flex-col gap-1.5 transition ${
+                                        isBlocked
+                                            ? "bg-destructive/10 border-destructive/30 text-destructive"
+                                            : "bg-muted/40 border-border text-foreground"
+                                    }`}>
+                                        <div className="flex items-center justify-between font-semibold">
+                                            <span className="flex items-center gap-1.5">
+                                                <span>⏱️ Scheduled Shift:</span>
+                                                <span className="font-mono text-foreground">{format12Hour(shiftStart)} – {format12Hour(shiftEnd)}</span>
+                                            </span>
+                                            {isShiftStarted ? (
+                                                <span className="pill pill-destructive text-[0.65rem] font-bold">Shift In Progress</span>
+                                            ) : isPastStart ? (
+                                                <span className="pill pill-destructive text-[0.65rem] font-bold">Past Date</span>
+                                            ) : (
+                                                <span className="pill pill-success text-[0.65rem] font-bold">Not Started</span>
+                                            )}
+                                        </div>
+                                        {isShiftStarted ? (
+                                            <p className="text-[0.72rem] text-destructive font-medium leading-relaxed">
+                                                ⛔ <strong>Shift already started!</strong> {selectedEmp.full_name}&apos;s shift began at {format12Hour(shiftStart)} today (Current IST: {format12Hour(currentISTTime)}). Leave cannot be applied once the shift has started.
+                                            </p>
+                                        ) : isPastStart ? (
+                                            <p className="text-[0.72rem] text-destructive font-medium leading-relaxed">
+                                                ⛔ Cannot apply leave for past date ({form.start_date}). Leave must be applied before shift starts.
+                                            </p>
+                                        ) : (
+                                            <p className="text-[0.7rem] text-muted-foreground">
+                                                ✓ Shift begins at {format12Hour(shiftStart)}. Leave request can be submitted.
+                                            </p>
+                                        )}
+                                    </div>
+                                );
+                            })()}
+
                             <div className="form-group">
                                 <label className="label">Leave Type</label>
                                 <select className="input" value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value as LeaveType })}>
@@ -285,15 +432,68 @@ export default function LeavesPage() {
             {/* Edit Leave Modal */}
             {showEdit && (
                 <div className="fixed inset-0 bg-black/50 grid place-items-center z-50 p-4">
-                    <div className="card w-full max-w-[450px]">
+                    <div className="card w-full max-w-[460px]">
                         <h2 className="text-xl">Edit Leave Request</h2>
                         <form onSubmit={handleEditSave} className="mt-4 flex flex-col gap-4">
                             <div className="form-group">
                                 <label className="label">Employee</label>
                                 <select className="input" disabled value={form.employee_id}>
-                                    {employees.map((emp) => <option key={emp.id} value={emp.id}>{emp.full_name}</option>)}
+                                    {employees.map((emp) => (
+                                        <option key={emp.id} value={emp.id}>
+                                            {emp.full_name} ({emp.role || "Staff"} • {format12Hour(emp.shift_start)})
+                                        </option>
+                                    ))}
                                 </select>
                             </div>
+
+                            {/* Shift Timing & Status Banner */}
+                            {form.employee_id && (() => {
+                                const selectedEmp = employees.find((e) => e.id === form.employee_id);
+                                if (!selectedEmp) return null;
+                                const { todayIST, currentISTTime } = getISTNow();
+                                const shiftStart = selectedEmp.shift_start ? selectedEmp.shift_start.substring(0, 5) : "10:00";
+                                const shiftEnd = selectedEmp.shift_end ? selectedEmp.shift_end.substring(0, 5) : "22:00";
+                                const isTodayCovered = form.start_date <= todayIST && form.end_date >= todayIST;
+                                const isPastStart = form.start_date < todayIST;
+                                const isShiftStarted = isTodayCovered && currentISTTime >= shiftStart;
+                                const isBlocked = isShiftStarted || isPastStart;
+
+                                return (
+                                    <div className={`p-3 rounded-lg border text-xs flex flex-col gap-1.5 transition ${
+                                        isBlocked
+                                            ? "bg-destructive/10 border-destructive/30 text-destructive"
+                                            : "bg-muted/40 border-border text-foreground"
+                                    }`}>
+                                        <div className="flex items-center justify-between font-semibold">
+                                            <span className="flex items-center gap-1.5">
+                                                <span>⏱️ Scheduled Shift:</span>
+                                                <span className="font-mono text-foreground">{format12Hour(shiftStart)} – {format12Hour(shiftEnd)}</span>
+                                            </span>
+                                            {isShiftStarted ? (
+                                                <span className="pill pill-destructive text-[0.65rem] font-bold">Shift In Progress</span>
+                                            ) : isPastStart ? (
+                                                <span className="pill pill-destructive text-[0.65rem] font-bold">Past Date</span>
+                                            ) : (
+                                                <span className="pill pill-success text-[0.65rem] font-bold">Not Started</span>
+                                            )}
+                                        </div>
+                                        {isShiftStarted ? (
+                                            <p className="text-[0.72rem] text-destructive font-medium leading-relaxed">
+                                                ⛔ <strong>Shift already started!</strong> {selectedEmp.full_name}&apos;s shift began at {format12Hour(shiftStart)} today (Current IST: {format12Hour(currentISTTime)}). Leave cannot be applied once the shift has started.
+                                            </p>
+                                        ) : isPastStart ? (
+                                            <p className="text-[0.72rem] text-destructive font-medium leading-relaxed">
+                                                ⛔ Cannot apply leave for past date ({form.start_date}). Leave must be applied before shift starts.
+                                            </p>
+                                        ) : (
+                                            <p className="text-[0.7rem] text-muted-foreground">
+                                                ✓ Shift begins at {format12Hour(shiftStart)}. Leave request can be submitted.
+                                            </p>
+                                        )}
+                                    </div>
+                                );
+                            })()}
+
                             <div className="form-group">
                                 <label className="label">Leave Type</label>
                                 <select className="input" value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value as LeaveType })}>

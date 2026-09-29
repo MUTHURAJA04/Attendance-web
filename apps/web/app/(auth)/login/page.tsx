@@ -30,7 +30,7 @@ export default function LoginPage() {
 
     // Refresh server-side session so middleware picks up the new auth cookies
     router.refresh();
-    router.replace("/dashboard");
+    router.replace("/select-brand");
   }
 
   return (

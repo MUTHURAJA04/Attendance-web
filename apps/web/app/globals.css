@@ -304,3 +304,75 @@
     grid-template-columns: repeat(2, 1fr);
   }
 }
+
+/* ═══════════════════════════════════════════════════
+   Print Styles
+   ═══════════════════════════════════════════════════ */
+@media print {
+  @page {
+    margin: 8mm;
+    size: auto;
+  }
+
+  html,
+  body {
+    background: #ffffff !important;
+    background-color: #ffffff !important;
+    color: #000000 !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* When printing from payslip modal, isolate ONLY the payslip */
+  body.modal-open .sidebar,
+  body.modal-open .top-nav,
+  body.modal-open header,
+  body.modal-open nav,
+  body.modal-open aside,
+  body.printing-payslip .sidebar,
+  body.printing-payslip .top-nav,
+  body.printing-payslip header,
+  body.printing-payslip nav,
+  body.printing-payslip aside,
+  .print\:hidden {
+    display: none !important;
+    visibility: hidden !important;
+  }
+
+  body.modal-open .main-content > *:not([role="dialog"]):not(:has(#payslip-printable-content)),
+  body.printing-payslip .main-content > *:not([role="dialog"]):not(:has(#payslip-printable-content)) {
+    display: none !important;
+    visibility: hidden !important;
+  }
+
+  #payslip-printable-content {
+    display: flex !important;
+    visibility: visible !important;
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+
+  #payslip-printable-content * {
+    visibility: visible !important;
+  }
+
+  .app-layout {
+    display: block !important;
+    width: 100% !important;
+    min-height: auto !important;
+  }
+
+  .main-content {
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+
+  .page-container {
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+}

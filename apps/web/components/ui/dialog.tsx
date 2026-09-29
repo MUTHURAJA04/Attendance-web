@@ -4,18 +4,23 @@ export function Dialog({ open, onOpenChange, children }: { open: boolean, onOpen
     useEffect(() => {
         if (open) {
             document.body.style.overflow = "hidden";
+            document.body.classList.add("modal-open");
         } else {
             document.body.style.overflow = "auto";
+            document.body.classList.remove("modal-open");
         }
-        return () => { document.body.style.overflow = "auto"; };
+        return () => {
+            document.body.style.overflow = "auto";
+            document.body.classList.remove("modal-open");
+        };
     }, [open]);
 
     if (!open) return null;
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => onOpenChange(false)}></div>
-            <div className="relative z-10 w-full">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 print:static print:block print:p-0 print:m-0 print:inset-auto">
+            <div className="absolute inset-0 bg-black/60 backdrop-blur-sm print:hidden" onClick={() => onOpenChange(false)}></div>
+            <div className="relative z-10 w-full print:static print:w-full print:p-0 print:m-0">
                 {children}
             </div>
         </div>
@@ -24,7 +29,7 @@ export function Dialog({ open, onOpenChange, children }: { open: boolean, onOpen
 
 export function DialogContent({ children, className = "" }: { children: React.ReactNode, className?: string }) {
     return (
-        <div className={`bg-white rounded-xl shadow-2xl mx-auto w-full p-6 animate-in zoom-in-95 duration-200 ${className}`}>
+        <div className={`bg-white rounded-xl shadow-2xl mx-auto w-full p-6 animate-in zoom-in-95 duration-200 print:shadow-none print:border-none print:p-0 print:m-0 print:max-w-none print:w-full ${className}`}>
             {children}
         </div>
     );

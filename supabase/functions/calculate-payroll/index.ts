@@ -48,19 +48,34 @@ interface LeaveMultipliers {
   uninformed: number;          // default 2
 }
 
-interface LoanRecord {
+interface BranchRule {
   id: string;
-  employee_id: string;
-  type: "LOAN" | "ADVANCE";
-  amount: number;
-  balance_amount: number;
-  deduction_month?: number;
-  deduction_year?: number;
-  repayment_schedule?: Array<{ month: number; year: number; amount: number }>;
+  branch_id: string | null;
+  rule_type: "LATE_COMING" | "LEAVE_POLICY" | "OVERTIME";
+  title: string;
+  threshold_minutes: number;
+  deduction_percentage: number;
+  rate_multiplier: number;
+  leave_type: string | null;
+  eligible_roles: string[];
+  eligible_employee_ids?: string[];
+  is_active: boolean;
+}
+
+interface IncentiveRule {
+  id: string;
+  name?: string | null;
+  branch_id: string | null;
+  role_id: string | null;
+  target_amount: number | null;
+  incentive_amount: number | null;
+  type: string;
 }
 
 function computeForEmployee(
   empId: string,
+  empRole: string,
+  empBranchId: string | null,
   doj: string,
   structures: SalaryStructure[],
   logs: AttendanceLog[],
@@ -69,7 +84,10 @@ function computeForEmployee(
   totalDaysInMonth: number,
   periodMonth: number,
   periodYear: number,
-  multipliers: LeaveMultipliers
+  multipliers: LeaveMultipliers,
+  branchRules: BranchRule[] = [],
+  incentiveRules: IncentiveRule[] = [],
+  branchSalesMap: Record<string, number> = {}
 ) {
   // Find latest salary structure for this employee
   const structure = structures
@@ -79,6 +97,19 @@ function computeForEmployee(
         new Date(b.effective_from).getTime() -
         new Date(a.effective_from).getTime()
     )[0];
+
+  // Filter active rules for this employee (matching branch & role/employee eligibility)
+  const activeRules = branchRules.filter((r) => {
+    if (!r.is_active) return false;
+    if (r.branch_id && empBranchId && r.branch_id !== empBranchId) return false;
+    if (r.eligible_employee_ids && r.eligible_employee_ids.length > 0) {
+      return r.eligible_employee_ids.includes(empId);
+    }
+    if (r.eligible_roles && r.eligible_roles.length > 0 && !r.eligible_roles.includes("ALL")) {
+      return r.eligible_roles.includes(empRole);
+    }
+    return true;
+  });
 
   // ── Proration Logic ──
   const periodStart = new Date(periodYear, periodMonth - 1, 1);
@@ -106,15 +137,50 @@ function computeForEmployee(
   ).length;
   const halfDays = empLogs.filter((l) => l.status === "HALF_DAY").length;
   const lateDays = empLogs.filter((l) => l.status === "LATE").length;
+
+  // ── Dynamic Overtime calculation with Branch Rules ──
+  const otRule = activeRules.find((r) => r.rule_type === "OVERTIME");
+  const minOtMins = otRule ? Number(otRule.threshold_minutes || 0) : 0;
+  const otMultiplier = otRule ? Number(otRule.rate_multiplier || 1.0) : 1.0;
+
   const otHours = empLogs.reduce((sum, l) => {
     if (l.status === "OT" && l.check_in && l.check_out) {
-      const hrs =
+      const durationMins =
         (new Date(l.check_out).getTime() - new Date(l.check_in).getTime()) /
-        3600000;
-      return sum + hrs;
+        60000;
+      if (durationMins >= minOtMins) {
+        return sum + durationMins / 60;
+      }
     }
     return sum;
   }, 0);
+
+  const baseOtRate = Number(structure?.ot_rate || 100);
+  const effectiveOtRate = baseOtRate * otMultiplier;
+  const overtimePay = Math.round(otHours * effectiveOtRate);
+
+  // ── Dynamic Late Coming deduction with Branch Rules ──
+  const lateRules = activeRules
+    .filter((r) => r.rule_type === "LATE_COMING")
+    .sort((a, b) => b.threshold_minutes - a.threshold_minutes); // Highest threshold first
+
+  let latePenaltyDeduction = 0;
+  if (lateRules.length > 0) {
+    empLogs.forEach((l) => {
+      if (l.status === "LATE" && l.check_in) {
+        const inDate = new Date(l.check_in);
+        const inMinutes = inDate.getHours() * 60 + inDate.getMinutes();
+        const shiftStartMinutes = 9 * 60; // 09:00 default
+        const minutesLate = Math.max(0, inMinutes - shiftStartMinutes);
+
+        const matchedRule = lateRules.find((r) => minutesLate >= Number(r.threshold_minutes));
+        if (matchedRule) {
+          const deductionPercent = Number(matchedRule.deduction_percentage || 0);
+          latePenaltyDeduction += (deductionPercent / 100) * dailySalary;
+        }
+      }
+    });
+  }
 
   // Count leaves by tier
   const empLeaves = leaves.filter((l) => l.employee_id === empId);
@@ -123,7 +189,6 @@ function computeForEmployee(
 
   const countDays = (reqs: LeaveRequest[]) =>
     reqs.reduce((sum, l) => {
-      // Normalize dates to noon to prevent timezone boundary issues
       const s = new Date(l.start_date + "T12:00:00");
       const e = new Date(l.end_date + "T12:00:00");
       const effS = new Date(effectiveStart.getTime()); effS.setHours(12, 0, 0, 0);
@@ -132,7 +197,7 @@ function computeForEmployee(
       const boundedStart = s > effS ? s : effS;
       const boundedEnd = e < effE ? e : effE;
 
-      if (boundedStart > boundedEnd) return sum; // Leave is outside the working period
+      if (boundedStart > boundedEnd) return sum;
 
       return sum + Math.round((boundedEnd.getTime() - boundedStart.getTime()) / 86400000) + 1;
     }, 0);
@@ -149,13 +214,22 @@ function computeForEmployee(
       informedUnapprovedDays
   );
 
-  // Three-tier absence deduction using configurable multipliers
+  // ── Dynamic Leave Multipliers from Branch Rules or Org Settings ──
+  const approvedLeaveRule = activeRules.find((r) => r.rule_type === "LEAVE_POLICY" && (r.leave_type === "APPROVED" || r.leave_type === "ALL"));
+  const unapprovedLeaveRule = activeRules.find((r) => r.rule_type === "LEAVE_POLICY" && r.leave_type === "UNAPPROVED");
+  const absentLeaveRule = activeRules.find((r) => r.rule_type === "LEAVE_POLICY" && (r.leave_type === "UNINFORMED_ABSENT" || r.leave_type === "ABSENT"));
+
+  const multApproved = approvedLeaveRule ? Number(approvedLeaveRule.deduction_percentage) / 100 : multipliers.informed_approved;
+  const multUnapproved = unapprovedLeaveRule ? Number(unapprovedLeaveRule.deduction_percentage) / 100 : multipliers.informed_unapproved;
+  const multAbsent = absentLeaveRule ? Number(absentLeaveRule.deduction_percentage) / 100 : multipliers.uninformed;
+
+  // Three-tier absence deduction
   const absenceDeduction =
-    informedApprovedDays * dailySalary * multipliers.informed_approved +
-    informedUnapprovedDays * dailySalary * multipliers.informed_unapproved +
-    uninformedAbsentDays * dailySalary * multipliers.uninformed;
-  const otRate = Number(structure?.ot_rate || 100);
-  const overtimePay = otHours * otRate;
+    informedApprovedDays * dailySalary * multApproved +
+    informedUnapprovedDays * dailySalary * multUnapproved +
+    uninformedAbsentDays * dailySalary * multAbsent;
+
+  const totalAbsenceAndLateDeduction = Math.round(absenceDeduction + latePenaltyDeduction);
 
   // ── Earned Salary Components ──
   const earnedBasic = Math.round((basicPay / totalDaysInMonth) * expectedWorkingDays);
@@ -163,17 +237,31 @@ function computeForEmployee(
   const earnedAllowances = Math.round((allowances / totalDaysInMonth) * expectedWorkingDays);
   const expectedGross = earnedBasic + earnedHra + earnedAllowances;
 
-  const grossPay = Math.max(0, expectedGross - absenceDeduction + overtimePay);
+  // ── Calculate Incentives ──
+  let incentivePay = 0;
+  const branchSales = empBranchId ? (branchSalesMap[empBranchId] || 0) : 0;
+  for (const rule of incentiveRules) {
+    if (rule.branch_id && empBranchId && rule.branch_id !== empBranchId) continue;
+    const roles = rule.role_id ? rule.role_id.split(",").map((r) => r.trim()) : ["ALL"];
+    if (!roles.includes("ALL") && !roles.includes(empRole)) continue;
+    const target = Number(rule.target_amount || 0);
+    if (branchSales >= target && target > 0) {
+      if (rule.type === "PERCENTAGE") {
+        incentivePay += Math.round(earnedBasic * (Number(rule.incentive_amount || 0) / 100));
+      } else {
+        incentivePay += Math.round(Number(rule.incentive_amount || 0));
+      }
+    }
+  }
+
+  const grossPay = Math.max(0, expectedGross - totalAbsenceAndLateDeduction + overtimePay + incentivePay);
 
   // ── Statutory Deductions ──
-  // PF: 12% of min(earnedBasic, ₹15,000)
   const pfBase = Math.min(earnedBasic, 15000);
   const pfDeduction = Math.round(pfBase * 0.12);
 
-  // ESI: 0.75% if gross < ₹21,000
   const esiDeduction = grossPay < 21000 ? Math.round(grossPay * 0.0075) : 0;
 
-  // PT (Tamil Nadu): ₹200 if gross > ₹15,000; ₹150 if > ₹10,000
   let ptDeduction = 0;
   if (grossPay > 15000) ptDeduction = 200;
   else if (grossPay > 10000) ptDeduction = 150;
@@ -218,7 +306,7 @@ function computeForEmployee(
       basic_pay: earnedBasic,
       hra: earnedHra,
       allowances: earnedAllowances,
-      incentives: 0,
+      incentives: incentivePay,
       overtime_pay: Math.round(overtimePay),
       gross_pay: Math.round(grossPay),
       pf_deduction: pfDeduction,
@@ -232,7 +320,7 @@ function computeForEmployee(
       late_days: lateDays,
       half_days: halfDays,
       leave_days: informedApprovedDays,
-      late_deduction: Math.round(absenceDeduction),
+      late_deduction: totalAbsenceAndLateDeduction,
       informed_approved_days: informedApprovedDays,
       informed_unapproved_days: informedUnapprovedDays,
       uninformed_absent_days: uninformedAbsentDays,
@@ -363,7 +451,7 @@ serve(async (req) => {
   // ── Fetch Supporting Data ──
   const { start, end, totalDays } = istMonthRange(period.year, period.month);
 
-  const [structuresRes, attendanceRes, loansRes, leavesRes, settingsRes] =
+  const [structuresRes, attendanceRes, loansRes, leavesRes, settingsRes, rulesRes, incentiveRulesRes, salesRes] =
     await Promise.all([
       supabase.from("salary_structures").select("*"),
       supabase
@@ -386,12 +474,30 @@ serve(async (req) => {
           "leave_deduction_informed_unapproved",
           "leave_deduction_uninformed",
         ]),
+      supabase.from("branch_rules").select("*").eq("is_active", true),
+      supabase.from("incentive_rules").select("*"),
+      supabase
+        .from("branch_daily_sales")
+        .select("branch_id, sales_amount")
+        .gte("date", start.split("T")[0])
+        .lte("date", end.split("T")[0]),
     ]);
 
   const structures = (structuresRes.data || []) as SalaryStructure[];
   const attendanceLogs = (attendanceRes.data || []) as AttendanceLog[];
   const activeLoans = (loansRes.data || []) as LoanRecord[];
   const allLeaves = (leavesRes.data || []) as LeaveRequest[];
+  const branchRules = (rulesRes.data || []) as BranchRule[];
+  const incentiveRules = (incentiveRulesRes.data || []) as IncentiveRule[];
+
+  // Calculate monthly sales per branch
+  const branchSalesMap: Record<string, number> = {};
+  for (const sale of (salesRes.data || []) as Array<{ branch_id: string; sales_amount: number }>) {
+    if (sale.branch_id) {
+      branchSalesMap[sale.branch_id] =
+        (branchSalesMap[sale.branch_id] || 0) + Number(sale.sales_amount || 0);
+    }
+  }
 
   // Parse leave deduction multipliers from settings
   const settingsMap: Record<string, string> = {};
@@ -419,6 +525,8 @@ serve(async (req) => {
   for (const emp of employees) {
     const { payslip, loanUpdates } = computeForEmployee(
       emp.id,
+      emp.role,
+      emp.branch_id,
       emp.date_of_joining,
       structures,
       attendanceLogs,
@@ -427,7 +535,10 @@ serve(async (req) => {
       totalDays,
       period.month,
       period.year,
-      multipliers
+      multipliers,
+      branchRules,
+      incentiveRules,
+      branchSalesMap
     );
 
     allPayslips.push({ ...payslip, period_id: period.id });

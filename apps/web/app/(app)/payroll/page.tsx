@@ -90,24 +90,61 @@ export default function PayrollPage() {
         if (!period) return;
         setIsProcessing(true);
 
-        const result = await callEdgeFunction<{ summary: { employeeCount: number; totalGross: number; totalDeductions: number; totalNet: number } }>(
-            supabaseBrowser,
-            "calculate-payroll",
-            {
+        try {
+            const { data: sessionData } = await supabaseBrowser.auth.getSession();
+            const token = sessionData.session?.access_token;
+
+            const res = await fetch("/api/payroll/calculate", {
                 method: "POST",
-                body: {
+                headers: {
+                    "Content-Type": "application/json",
+                    ...(token ? { "Authorization": `Bearer ${token}` } : {})
+                },
+                body: JSON.stringify({
                     periodId: period.id,
                     branchId: globalBranch?.id || null,
-                },
+                }),
+            });
+
+            const data = await res.json();
+            if (!res.ok || data.error) {
+                // Fallback to Edge function if API route encounters error
+                const edgeResult = await callEdgeFunction<{ summary: { employeeCount: number; totalGross: number; totalDeductions: number; totalNet: number } }>(
+                    supabaseBrowser,
+                    "calculate-payroll",
+                    {
+                        method: "POST",
+                        body: {
+                            periodId: period.id,
+                            branchId: globalBranch?.id || null,
+                        },
+                    }
+                );
+                if (edgeResult.error) {
+                    alert("Payroll computation failed: " + (data.error || edgeResult.error));
+                }
             }
-        );
-
-        if (result.error) {
-            alert("Payroll computation failed: " + result.error);
+        } catch (err: any) {
+            console.error("Payroll calculation error:", err);
+            // Fallback to Edge Function
+            const edgeResult = await callEdgeFunction<{ summary: { employeeCount: number; totalGross: number; totalDeductions: number; totalNet: number } }>(
+                supabaseBrowser,
+                "calculate-payroll",
+                {
+                    method: "POST",
+                    body: {
+                        periodId: period.id,
+                        branchId: globalBranch?.id || null,
+                    },
+                }
+            );
+            if (edgeResult.error) {
+                alert("Payroll computation error: " + (err?.message || edgeResult.error));
+            }
+        } finally {
+            setIsProcessing(false);
+            await loadPayrollData();
         }
-
-        setIsProcessing(false);
-        loadPayrollData();
     };
 
     const totals = payslips.reduce(
@@ -239,6 +276,7 @@ export default function PayrollPage() {
                             <tr>
                                 <th>Employee</th>
                                 <th>Basic</th>
+                                <th>Incentives</th>
                                 <th>Gross Pay</th>
                                 <th>PF/ESI</th>
                                 <th>PT</th>
@@ -250,7 +288,7 @@ export default function PayrollPage() {
                         <tbody>
                             {payslips.length === 0 ? (
                                 <tr>
-                                    <td colSpan={8} className="text-center p-8 text-muted-foreground">
+                                    <td colSpan={9} className="text-center p-8 text-muted-foreground">
                                         {period ? 'Click "Compute Gross/Net Pay" to generate payslips.' : "Create a payroll period to begin."}
                                     </td>
                                 </tr>
@@ -264,6 +302,15 @@ export default function PayrollPage() {
                                             </div>
                                         </td>
                                         <td>₹{Number(slip.basic_pay).toLocaleString("en-IN")}</td>
+                                        <td>
+                                            {Number(slip.incentives || 0) > 0 ? (
+                                                <span className="text-primary font-semibold">
+                                                    +₹{Number(slip.incentives).toLocaleString("en-IN")}
+                                                </span>
+                                            ) : (
+                                                <span className="text-muted-foreground text-xs">₹0</span>
+                                            )}
+                                        </td>
                                         <td>₹{Number(slip.gross_pay).toLocaleString("en-IN")}</td>
                                         <td>₹{(Number(slip.pf_deduction) + Number(slip.esi_deduction)).toLocaleString("en-IN")}</td>
                                         <td>₹{Number(slip.pt_deduction).toLocaleString("en-IN")}</td>

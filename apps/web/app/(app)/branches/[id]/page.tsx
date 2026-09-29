@@ -4,7 +4,8 @@ import { useState, useEffect } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { supabaseBrowser } from "../../../../lib/supabase/client";
-import type { Branch, Employee, IncentiveRule } from "../../../../lib/types";
+import type { Branch, Employee, IncentiveRule, BranchRule } from "../../../../lib/types";
+import { BranchRuleBuilder } from "../../../../components/BranchRuleBuilder";
 
 export default function BranchDetailsPage() {
     const { id } = useParams();
@@ -13,28 +14,33 @@ export default function BranchDetailsPage() {
     const [todayCount, setTodayCount] = useState(0);
     const [avgSales, setAvgSales] = useState(0);
     const [incentiveRules, setIncentiveRules] = useState<IncentiveRule[]>([]);
+    const [branchRules, setBranchRules] = useState<BranchRule[]>([]);
+    const [isRuleModalOpen, setIsRuleModalOpen] = useState(false);
     const [loading, setLoading] = useState(true);
 
+    async function loadBranchData() {
+        const today = new Date().toISOString().split("T")[0];
+
+        const [branchRes, employeesRes, attRes, salesRes, rulesRes, branchRulesRes] = await Promise.all([
+            supabaseBrowser.from("branches").select("*").eq("id", id).single(),
+            supabaseBrowser.from("employees").select("*").eq("branch_id", id).eq("status", "ACTIVE"),
+            supabaseBrowser.from("attendance_logs").select("*", { count: "exact", head: true }).eq("branch_id", id).gte("check_in", today),
+            supabaseBrowser.from("branch_daily_sales").select("sales_amount").eq("branch_id", id).order("date", { ascending: false }).limit(30),
+            supabaseBrowser.from("incentive_rules").select("*").or(`branch_id.eq.${id},branch_id.is.null`),
+            supabaseBrowser.from("branch_rules").select("*").or(`branch_id.eq.${id},branch_id.is.null`).order("created_at", { ascending: false }),
+        ]);
+
+        if (branchRes.data) setBranch(branchRes.data as Branch);
+        setEmployees((employeesRes.data as Employee[]) || []);
+        setTodayCount(attRes.count || 0);
+        const salesData = (salesRes.data || []) as { sales_amount: number }[];
+        setAvgSales(salesData.length > 0 ? Math.round(salesData.reduce((s, d) => s + Number(d.sales_amount), 0) / salesData.length) : 0);
+        setIncentiveRules((rulesRes.data as IncentiveRule[]) || []);
+        setBranchRules((branchRulesRes.data as BranchRule[]) || []);
+        setLoading(false);
+    }
+
     useEffect(() => {
-        async function loadBranchData() {
-            const today = new Date().toISOString().split("T")[0];
-
-            const [branchRes, employeesRes, attRes, salesRes, rulesRes] = await Promise.all([
-                supabaseBrowser.from("branches").select("*").eq("id", id).single(),
-                supabaseBrowser.from("employees").select("*").eq("branch_id", id).eq("status", "ACTIVE"),
-                supabaseBrowser.from("attendance_logs").select("*", { count: "exact", head: true }).eq("branch_id", id).gte("check_in", today),
-                supabaseBrowser.from("branch_daily_sales").select("sales_amount").eq("branch_id", id).order("date", { ascending: false }).limit(30),
-                supabaseBrowser.from("incentive_rules").select("*").or(`branch_id.eq.${id},branch_id.is.null`),
-            ]);
-
-            if (branchRes.data) setBranch(branchRes.data as Branch);
-            setEmployees((employeesRes.data as Employee[]) || []);
-            setTodayCount(attRes.count || 0);
-            const salesData = (salesRes.data || []) as { sales_amount: number }[];
-            setAvgSales(salesData.length > 0 ? Math.round(salesData.reduce((s, d) => s + Number(d.sales_amount), 0) / salesData.length) : 0);
-            setIncentiveRules((rulesRes.data as IncentiveRule[]) || []);
-            setLoading(false);
-        }
         loadBranchData();
     }, [id]);
 
@@ -47,6 +53,11 @@ export default function BranchDetailsPage() {
 
     if (loading) return <div className="centered">Loading branch configuration...</div>;
     if (!branch) return <div className="centered">Branch not found.</div>;
+
+    const activeRules = branchRules.filter((r) => r.is_active);
+    const lateRules = activeRules.filter((r) => r.rule_type === "LATE_COMING");
+    const leaveRules = activeRules.filter((r) => r.rule_type === "LEAVE_POLICY");
+    const otRules = activeRules.filter((r) => r.rule_type === "OVERTIME");
 
     return (
         <div>
@@ -122,6 +133,124 @@ export default function BranchDetailsPage() {
                 </div>
 
                 <div className="flex flex-col gap-6">
+                    {/* Leave & Late Rules Summary Card */}
+                    <div className="card">
+                        <div className="flex justify-between items-center mb-4">
+                            <div>
+                                <h3 className="font-bold text-base">Leave & Late Rules</h3>
+                                <p className="text-xs text-muted-foreground">Automated deductions & OT rules</p>
+                            </div>
+                            <span className={`pill ${activeRules.length > 0 ? "pill-success" : "pill-muted"}`}>
+                                {activeRules.length} Active
+                            </span>
+                        </div>
+
+                        {activeRules.length === 0 ? (
+                            <div className="bg-muted/40 p-3 rounded-lg border text-center mb-4">
+                                <p className="text-xs text-muted-foreground">No custom rules active for this branch.</p>
+                                <p className="text-[0.7rem] text-muted-foreground mt-1">Default TN statutory rates apply.</p>
+                            </div>
+                        ) : (
+                            <div className="flex flex-col gap-2.5 mb-4">
+                                {/* Late Coming Summary */}
+                                <div className="p-2.5 bg-muted/50 rounded-lg border text-xs">
+                                    <div className="flex justify-between items-center mb-1">
+                                        <span className="font-semibold flex items-center gap-1.5">
+                                            <span>⏱️ Late Coming</span>
+                                            <span className="text-[0.65rem] text-muted-foreground font-normal">({lateRules.length})</span>
+                                        </span>
+                                        {lateRules.length > 0 ? (
+                                            <span className="pill pill-warning text-[0.65rem]">Active</span>
+                                        ) : (
+                                            <span className="text-[0.65rem] text-muted-foreground">None</span>
+                                        )}
+                                    </div>
+                                    {lateRules.length > 0 ? (
+                                        <div className="flex flex-wrap gap-1 mt-1">
+                                            {lateRules.slice(0, 2).map((r) => (
+                                                <span key={r.id} className="inline-block px-1.5 py-0.5 bg-background border rounded text-[0.7rem]">
+                                                    &gt;{r.threshold_minutes}m: -{r.deduction_percentage}%
+                                                </span>
+                                            ))}
+                                            {lateRules.length > 2 && (
+                                                <span className="text-[0.7rem] text-muted-foreground self-center">
+                                                    +{lateRules.length - 2} more
+                                                </span>
+                                            )}
+                                        </div>
+                                    ) : (
+                                        <p className="text-[0.7rem] text-muted-foreground">Standard grace period applies</p>
+                                    )}
+                                </div>
+
+                                {/* Leave Policy Summary */}
+                                <div className="p-2.5 bg-muted/50 rounded-lg border text-xs">
+                                    <div className="flex justify-between items-center mb-1">
+                                        <span className="font-semibold flex items-center gap-1.5">
+                                            <span>🏖️ Leave Policy</span>
+                                            <span className="text-[0.65rem] text-muted-foreground font-normal">({leaveRules.length})</span>
+                                        </span>
+                                        {leaveRules.length > 0 ? (
+                                            <span className="pill pill-destructive text-[0.65rem]">Active</span>
+                                        ) : (
+                                            <span className="text-[0.65rem] text-muted-foreground">None</span>
+                                        )}
+                                    </div>
+                                    {leaveRules.length > 0 ? (
+                                        <div className="flex flex-wrap gap-1 mt-1">
+                                            {leaveRules.slice(0, 2).map((r) => (
+                                                <span key={r.id} className="inline-block px-1.5 py-0.5 bg-background border rounded text-[0.7rem]">
+                                                    {r.leave_type || "Leave"}: {r.deduction_percentage}%
+                                                </span>
+                                            ))}
+                                            {leaveRules.length > 2 && (
+                                                <span className="text-[0.7rem] text-muted-foreground self-center">
+                                                    +{leaveRules.length - 2} more
+                                                </span>
+                                            )}
+                                        </div>
+                                    ) : (
+                                        <p className="text-[0.7rem] text-muted-foreground">1.0x / 1.5x standard tiered absence deduction</p>
+                                    )}
+                                </div>
+
+                                {/* Overtime Summary */}
+                                <div className="p-2.5 bg-muted/50 rounded-lg border text-xs">
+                                    <div className="flex justify-between items-center mb-1">
+                                        <span className="font-semibold flex items-center gap-1.5">
+                                            <span>⚡ Overtime (OT)</span>
+                                            <span className="text-[0.65rem] text-muted-foreground font-normal">({otRules.length})</span>
+                                        </span>
+                                        {otRules.length > 0 ? (
+                                            <span className="pill pill-success text-[0.65rem]">Active</span>
+                                        ) : (
+                                            <span className="text-[0.65rem] text-muted-foreground">None</span>
+                                        )}
+                                    </div>
+                                    {otRules.length > 0 ? (
+                                        <div className="flex flex-wrap gap-1 mt-1">
+                                            {otRules.slice(0, 2).map((r) => (
+                                                <span key={r.id} className="inline-block px-1.5 py-0.5 bg-background border rounded text-[0.7rem]">
+                                                    &gt;{r.threshold_minutes}m: {r.rate_multiplier}x rate
+                                                </span>
+                                            ))}
+                                        </div>
+                                    ) : (
+                                        <p className="text-[0.7rem] text-muted-foreground">Standard 1.0x hourly OT rate</p>
+                                    )}
+                                </div>
+                            </div>
+                        )}
+
+                        <button
+                            onClick={() => setIsRuleModalOpen(true)}
+                            className="button button-primary w-full text-xs font-semibold"
+                        >
+                            ⚙️ Manage Rules
+                        </button>
+                    </div>
+
+                    {/* Incentive Rules Card */}
                     <div className="card">
                         <h3 className="mb-4">Incentive Rules</h3>
                         {incentiveRules.length === 0 ? (
@@ -142,29 +271,21 @@ export default function BranchDetailsPage() {
                             </div>
                         )}
                         <Link href="/incentives" className="button button-secondary mt-4 w-full text-[0.8rem]">
-                            Manage Rules
+                            Manage Incentives
                         </Link>
-                    </div>
-
-                    <div className="card">
-                        <h3 className="mb-4">Branch Info</h3>
-                        <div className="flex flex-col gap-3">
-                            <div className="flex justify-between text-sm">
-                                <span className="text-muted-foreground">City</span>
-                                <span>{branch.city}</span>
-                            </div>
-                            <div className="flex justify-between text-sm">
-                                <span className="text-muted-foreground">State</span>
-                                <span>{branch.state || "N/A"}</span>
-                            </div>
-                            <div className="flex justify-between text-sm">
-                                <span className="text-muted-foreground">Address</span>
-                                <span>{branch.address || "Not set"}</span>
-                            </div>
-                        </div>
                     </div>
                 </div>
             </div>
+
+            {/* Rule Builder Drawer / Modal */}
+            <BranchRuleBuilder
+                isOpen={isRuleModalOpen}
+                onClose={() => setIsRuleModalOpen(false)}
+                branchId={id as string}
+                branchName={branch.name}
+                employees={employees}
+                onRulesUpdated={loadBranchData}
+            />
         </div>
     );
 }

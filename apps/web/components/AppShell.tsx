@@ -22,6 +22,7 @@ const NAV_ITEMS: NavItem[] = [
 ];
 
 import { useTenant } from "./TenantContext";
+import { NotificationBell } from "./NotificationBell";
 
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
@@ -50,8 +51,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   };
 
   return (
-    <div className="app-layout">
-      <aside className="sidebar">
+    <div className="app-layout print:block print:w-full print:min-h-0">
+      <aside className="sidebar print:hidden">
         <div className="sidebar-header">
           Attendance & Payroll
         </div>
@@ -69,8 +70,8 @@ export function AppShell({ children }: { children: ReactNode }) {
         </nav>
       </aside>
 
-      <main className="main-content">
-        <header className="top-nav">
+      <main className="main-content print:p-0 print:m-0 print:w-full print:max-w-none">
+        <header className="top-nav print:hidden">
           <div className="flex items-center gap-4">
             {/* Context Switcher Button */}
             {!isLoading && (
@@ -82,7 +83,9 @@ export function AppShell({ children }: { children: ReactNode }) {
               </button>
             )}
           </div>
-          <div className="flex items-center gap-4 relative">
+          <div className="flex items-center gap-3 relative">
+            <NotificationBell />
+
             <div
               onClick={() => setIsDropdownOpen(!isDropdownOpen)}
               title="Open Menu"
@@ -102,6 +105,14 @@ export function AppShell({ children }: { children: ReactNode }) {
                     <div className="text-[0.65rem] text-muted-foreground font-medium uppercase tracking-wider mt-0.5">{role}</div>
                   </div>
                   
+                  <Link
+                    href="/select-brand"
+                    onClick={() => setIsDropdownOpen(false)}
+                    className="flex items-center gap-2 px-3 py-2 rounded-md hover:bg-primary/10 text-sm text-primary font-semibold no-underline transition-colors w-full text-left"
+                  >
+                    🏢 Switch Brand / Branch
+                  </Link>
+
                   <Link
                     href="/profile"
                     onClick={() => setIsDropdownOpen(false)}
@@ -139,6 +150,14 @@ export function AppShell({ children }: { children: ReactNode }) {
                       ⚙️ Settings
                     </Link>
                   )}
+
+                  <Link
+                    href="/logs"
+                    onClick={() => setIsDropdownOpen(false)}
+                    className="flex items-center gap-2 px-3 py-2 rounded-md hover:bg-muted text-sm text-foreground no-underline transition-colors w-full text-left"
+                  >
+                    📜 Logs
+                  </Link>
 
                   <button
                     onClick={async () => {

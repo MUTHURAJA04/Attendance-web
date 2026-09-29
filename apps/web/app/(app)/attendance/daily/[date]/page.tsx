@@ -12,6 +12,11 @@ interface PunchLog {
   check_in: string;
   check_out: string | null;
   status: string;
+  metadata?: {
+    auto_checked_out?: boolean;
+    auto_checkout_reason?: string;
+    [key: string]: any;
+  } | null;
 }
 
 interface EmployeeDailyData {
@@ -44,7 +49,7 @@ export default function DailyAttendancePage() {
     const endIST = `${dateParam}T23:59:59+05:30`;
 
     let empQuery = supabaseBrowser.from("employees").select("id, full_name").eq("status", "ACTIVE");
-    let logsQuery = supabaseBrowser.from("attendance_logs").select("id, employee_id, check_in, check_out, status").gte("check_in", startIST).lte("check_in", endIST).order("check_in", { ascending: true });
+    let logsQuery = supabaseBrowser.from("attendance_logs").select("id, employee_id, check_in, check_out, status, metadata").gte("check_in", startIST).lte("check_in", endIST).order("check_in", { ascending: true });
     let leavesQuery = supabaseBrowser.from("leave_requests").select("id, employee_id, start_date, end_date, status, employees!inner(branch_id)").in("status", ["APPROVED", "PENDING"]).lte("start_date", dateParam).gte("end_date", dateParam);
 
     if (globalBranch) {
@@ -233,10 +238,20 @@ export default function DailyAttendancePage() {
                     
                     <div className="w-1/4">
                       {emp.logs.length > 0 ? (
-                        <div className="text-sm font-medium">
+                        <div className="text-sm font-medium flex flex-col gap-1">
                           {emp.logs.map((l, i) => (
-                            <div key={i}>
-                              {new Date(l.check_in).toTimeString().substring(0, 5)} - {l.check_out ? new Date(l.check_out).toTimeString().substring(0, 5) : "TBD"}
+                            <div key={i} className="flex items-center gap-1.5 flex-wrap">
+                              <span>
+                                {new Date(l.check_in).toTimeString().substring(0, 5)} - {l.check_out ? new Date(l.check_out).toTimeString().substring(0, 5) : "TBD"}
+                              </span>
+                              {l.metadata?.auto_checked_out && (
+                                <span
+                                  className="px-1.5 py-0.2 text-[0.62rem] bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 font-sans font-semibold inline-flex items-center gap-0.5 rounded"
+                                  title="Auto checked out at 11:00 PM"
+                                >
+                                  <span>🌙</span> 11 PM Auto
+                                </span>
+                              )}
                             </div>
                           ))}
                         </div>

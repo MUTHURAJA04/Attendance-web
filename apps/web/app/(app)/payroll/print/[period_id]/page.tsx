@@ -12,6 +12,7 @@ export default function BulkPrintPayslips() {
     const { selectedBranch, selectedOrg } = useTenant();
 
     const [payslips, setPayslips] = useState<Payslip[]>([]);
+    const [loanBalances, setLoanBalances] = useState<Record<string, number>>({});
     const [period, setPeriod] = useState<PayrollPeriod | null>(null);
     const [orgName, setOrgName] = useState<string>("Company Name");
     const [branchName, setBranchName] = useState<string>("Branch Name");
@@ -27,40 +28,36 @@ export default function BulkPrintPayslips() {
         async function loadData() {
             setLoading(true);
 
-            // Fetch Organization details
-            if (selectedOrg) {
-                const { data: orgData } = await supabaseBrowser.from('organizations').select('name').eq('id', selectedOrg.id).single();
-                if (orgData) setOrgName(orgData.name);
+            const [orgRes, branchRes, periodRes, slipsRes, loansRes] = await Promise.all([
+                selectedOrg ? supabaseBrowser.from('organizations').select('name').eq('id', selectedOrg.id).single() : Promise.resolve({ data: null }),
+                selectedBranch ? supabaseBrowser.from('branches').select('name').eq('id', selectedBranch.id).single() : Promise.resolve({ data: null }),
+                supabaseBrowser.from('payroll_periods').select('*').eq('id', periodId).single(),
+                supabaseBrowser
+                    .from('payslips')
+                    .select(`
+                        *,
+                        employees!inner (
+                            full_name,
+                            role,
+                            branch_id,
+                            branches ( name )
+                        )
+                    `)
+                    .eq('period_id', periodId)
+                    .eq('employees.branch_id', selectedBranch?.id),
+                supabaseBrowser.from('loans').select('employee_id, balance_amount').eq('status', 'ACTIVE')
+            ]);
+
+            if (orgRes?.data) setOrgName(orgRes.data.name);
+            if (branchRes?.data) setBranchName(branchRes.data.name);
+            if (periodRes?.data) setPeriod(periodRes.data);
+            if (slipsRes?.data) setPayslips(slipsRes.data as any);
+
+            const loanMap: Record<string, number> = {};
+            for (const l of loansRes?.data || []) {
+                loanMap[l.employee_id] = (loanMap[l.employee_id] || 0) + Number(l.balance_amount || 0);
             }
-
-            // Fetch Branch details
-            if (selectedBranch) {
-                const { data: branchData } = await supabaseBrowser.from('branches').select('name').eq('id', selectedBranch.id).single();
-                if (branchData) setBranchName(branchData.name);
-            }
-
-            // Fetch Period details
-            const { data: periodData } = await supabaseBrowser.from('payroll_periods').select('*').eq('id', periodId).single();
-            if (periodData) setPeriod(periodData);
-
-            // Fetch ALL Payslips for this branch and period
-            const { data: slipData } = await supabaseBrowser
-                .from('payslips')
-                .select(`
-                    *,
-                    employees!inner (
-                        full_name,
-                        role,
-                        branch_id,
-                        branches ( name )
-                    )
-                `)
-                .eq('period_id', periodId)
-                .eq('employees.branch_id', selectedBranch?.id);
-
-            if (slipData) {
-                setPayslips(slipData as any);
-            }
+            setLoanBalances(loanMap);
 
             setLoading(false);
         }
@@ -203,6 +200,7 @@ export default function BulkPrintPayslips() {
                                             <div className="flex justify-between items-center"><span className="text-gray-600">Loan EMI</span><span className="font-medium text-gray-900">₹{Number(slip.loan_deduction || 0).toLocaleString("en-IN")}</span></div>
                                             <div className="flex justify-between items-center"><span className="text-gray-600">PT</span><span className="font-medium text-gray-900">₹{Number(slip.pt_deduction || 0).toLocaleString("en-IN")}</span></div>
                                             <div className="flex justify-between items-center"><span className="text-gray-600">TDS</span><span className="font-medium text-gray-900">₹{Number(slip.tds_deduction || 0).toLocaleString("en-IN")}</span></div>
+                                            <div className="flex justify-between items-center pt-1 border-t border-dashed border-gray-200"><span className="text-gray-800 font-semibold">Balance Loan</span><span className="font-bold text-gray-900">₹{Number(loanBalances[slip.employee_id] || 0).toLocaleString("en-IN")}</span></div>
                                         </div>
                                     </div>
 
@@ -213,7 +211,7 @@ export default function BulkPrintPayslips() {
                                             <span className="font-bold text-gray-900 text-[11px]">₹{Number(slip.gross_pay || 0).toLocaleString("en-IN")}</span>
                                         </div>
                                         <div className="flex justify-between items-center mb-1">
-                                            <span className="text-gray-500 font-bold uppercase tracking-wider text-[9px]">Total Deductions</span>
+                                            <span className="text-gray-500 font-bold uppercase tracking-wider text-[9px]">Deductions</span>
                                             <span className="font-bold text-gray-900 text-[11px]">₹{(
                                                 Number(slip.pf_deduction || 0) +
                                                 Number(slip.esi_deduction || 0) +

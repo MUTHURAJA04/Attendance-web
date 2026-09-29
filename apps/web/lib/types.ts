@@ -28,6 +28,8 @@ export interface Employee {
     role: "STAFF" | "MANAGER" | "KITCHEN" | "CASHIER";
     branch_id: string;
     date_of_joining: string;
+    gender?: string | null;
+    date_of_birth?: string | null;
     phone: string;
     address: string | null;
     emergency_contact_name: string | null;
@@ -47,6 +49,9 @@ export interface Employee {
     skills: string[];
     shift_start: string | null;
     shift_end: string | null;
+    shift_type?: "regular" | "break" | null;
+    shift_2_start?: string | null;
+    shift_2_end?: string | null;
     total_working_hours: number | null;
     created_by: string | null;
     created_at: string;
@@ -253,3 +258,24 @@ export interface EmployeeDocument {
     file_type: string;
     uploaded_at: string;
 }
+
+// ── Branch Rules (Late, Leave, OT) ───────────────────────
+
+export type BranchRuleType = "LATE_COMING" | "LEAVE_POLICY" | "OVERTIME";
+
+export interface BranchRule {
+    id: string;
+    branch_id: string | null;
+    rule_type: BranchRuleType;
+    title: string;
+    threshold_minutes: number;
+    deduction_percentage: number;
+    rate_multiplier: number;
+    leave_type: string | null;
+    eligible_roles: string[];
+    eligible_employee_ids?: string[];
+    is_active: boolean;
+    created_at?: string;
+    updated_at?: string;
+}
+
