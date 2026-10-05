@@ -577,12 +577,24 @@ export default function EmployeeDetailPage() {
                                     </div>
                                     <div className="grid grid-cols-2 gap-6 pt-5 border-t border-border/40">
                                         <div className="flex flex-col gap-1">
-                                            <span className="text-xs font-medium text-muted-foreground uppercase tracking-widest">PF UAN</span>
-                                            <span className="text-sm font-medium font-mono">{employee.pf_uan || "Not specified"}</span>
+                                            <span className="text-xs font-medium text-muted-foreground uppercase tracking-widest">PF Status</span>
+                                            <span className="text-sm font-medium">{employee.enable_pf !== false ? "ENABLED (12%)" : "DISABLED"}</span>
+                                            {employee.pf_uan && <span className="text-xs text-muted-foreground font-mono">UAN: {employee.pf_uan}</span>}
                                         </div>
                                         <div className="flex flex-col gap-1">
-                                            <span className="text-xs font-medium text-muted-foreground uppercase tracking-widest">ESI Number</span>
-                                            <span className="text-sm font-medium font-mono">{employee.esi_number || "Not specified"}</span>
+                                            <span className="text-xs font-medium text-muted-foreground uppercase tracking-widest">ESI Status</span>
+                                            <span className="text-sm font-medium">{employee.enable_esi !== false ? "ENABLED (0.75%)" : "DISABLED"}</span>
+                                            {employee.esi_number && <span className="text-xs text-muted-foreground font-mono">ESI #: {employee.esi_number}</span>}
+                                        </div>
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-6 pt-5 border-t border-border/40">
+                                        <div className="flex flex-col gap-1">
+                                            <span className="text-xs font-medium text-muted-foreground uppercase tracking-widest">Professional Tax (PT)</span>
+                                            <span className="text-sm font-medium">{employee.enable_pt !== false ? "ENABLED (TN Slab)" : "DISABLED"}</span>
+                                        </div>
+                                        <div className="flex flex-col gap-1">
+                                            <span className="text-xs font-medium text-muted-foreground uppercase tracking-widest">Overtime (OT)</span>
+                                            <span className="text-sm font-medium">{employee.enable_ot ? "ENABLED" : "DISABLED"}</span>
                                         </div>
                                     </div>
                                 </div>

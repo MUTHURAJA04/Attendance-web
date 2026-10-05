@@ -43,6 +43,11 @@ export interface Employee {
     pan: string | null;
     pf_uan: string | null;
     esi_number: string | null;
+    enable_pf?: boolean;
+    enable_esi?: boolean;
+    enable_ot?: boolean;
+    enable_pt?: boolean;
+    paid_off_days?: number;
     is_active: boolean;
     status: EmployeeStatus;
     department: string | null;
@@ -83,7 +88,7 @@ export interface AttendanceLog {
 
 // ── Leave ────────────────────────────────────────────────
 
-export type LeaveType = "CASUAL" | "SICK" | "PAID" | "LOP";
+export type LeaveType = "CASUAL" | "SICK" | "PAID" | "LOP" | "WEEK_OFF";
 export type LeaveStatus = "PENDING" | "APPROVED" | "REJECTED";
 
 export interface LeaveRequest {

@@ -7,7 +7,7 @@ import type { LeaveRequest, LeaveType, Employee } from "../../../lib/types";
 
 type EmployeeWithShift = Pick<
     Employee,
-    "id" | "full_name" | "branch_id" | "shift_start" | "shift_end" | "shift_type" | "role" | "employee_code"
+    "id" | "full_name" | "branch_id" | "shift_start" | "shift_end" | "shift_type" | "role" | "employee_code" | "paid_off_days"
 >;
 
 // Helper to get current Date & Time in IST (Asia/Kolkata)
@@ -86,7 +86,7 @@ export default function LeavesPage() {
             
         let empQuery = supabaseBrowser
             .from("employees")
-            .select("id, full_name, branch_id, shift_start, shift_end, shift_type, role, employee_code")
+            .select("id, full_name, branch_id, shift_start, shift_end, shift_type, role, employee_code, paid_off_days")
             .eq("status", "ACTIVE");
 
         if (globalBranch) {
@@ -106,6 +106,18 @@ export default function LeavesPage() {
     useEffect(() => {
         loadLeaves();
     }, [globalBranch, tenantLoading, month, year]);
+
+    // Check scheduled week-off availability for selected employee
+    const selectedEmp = employees.find((e) => e.id === form.employee_id);
+    const scheduledWeekOffCount = selectedEmp ? (selectedEmp.paid_off_days ?? 4) : 0;
+    const hasWeekOffAvailable = scheduledWeekOffCount >= 1;
+
+    // Reset leave type to default if selected employee has 0 scheduled week-offs and WEEK_OFF is selected
+    useEffect(() => {
+        if (!hasWeekOffAvailable && form.type === "WEEK_OFF") {
+            setForm((prev) => ({ ...prev, type: "CASUAL" }));
+        }
+    }, [form.employee_id, hasWeekOffAvailable, form.type]);
 
     // Validation: check if employee shift has already started
     const validateShiftForLeave = (
@@ -404,6 +416,9 @@ export default function LeavesPage() {
                                     <option value="SICK">Sick Leave</option>
                                     <option value="PAID">Paid Leave</option>
                                     <option value="LOP">Loss of Pay</option>
+                                    {hasWeekOffAvailable && (
+                                        <option value="WEEK_OFF">Scheduled Week-Off Leave</option>
+                                    )}
                                 </select>
                             </div>
                             <div className="flex gap-4">
@@ -501,6 +516,9 @@ export default function LeavesPage() {
                                     <option value="SICK">Sick Leave</option>
                                     <option value="PAID">Paid Leave</option>
                                     <option value="LOP">Loss of Pay</option>
+                                    {hasWeekOffAvailable && (
+                                        <option value="WEEK_OFF">Scheduled Week-Off Leave</option>
+                                    )}
                                 </select>
                             </div>
                             <div className="flex gap-4">

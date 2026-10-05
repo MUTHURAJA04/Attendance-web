@@ -73,9 +73,9 @@ export default function WriteOffReportPage() {
                     </thead>
                     <tbody>
                         {loading ? (
-                            <tr><td colSpan={6} className="centered h-32">Loading records...</td></tr>
+                            <tr><td colSpan={6} className="text-center align-middle h-32 text-muted-foreground">Loading records...</td></tr>
                         ) : writeoffs.length === 0 ? (
-                            <tr><td colSpan={6} className="centered h-32">No write-off records found.</td></tr>
+                            <tr><td colSpan={6} className="text-center align-middle h-32 text-muted-foreground">No write-off records found.</td></tr>
                         ) : (
                             writeoffs.map((wo: any) => (
                                 <tr key={wo.id}>

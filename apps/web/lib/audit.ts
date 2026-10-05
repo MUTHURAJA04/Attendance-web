@@ -21,18 +21,24 @@ export async function logAudit(
         const { data: { session } } = await supabaseBrowser.auth.getSession();
         const user = session?.user;
 
-        const row: Record<string, unknown> = {
-            action,
-            details: details ? (typeof details === "string" ? details : JSON.stringify(details)) : null,
-            performed_at: new Date().toISOString(),
-        };
+        let parsedDetails: Record<string, unknown> = {};
+        if (typeof details === "string") {
+            try { parsedDetails = JSON.parse(details); } catch { parsedDetails = { raw: details }; }
+        } else if (details && typeof details === "object") {
+            parsedDetails = { ...details };
+        }
 
-        if (user?.id) row.user_id = user.id;
-        if (user?.email) row.actor_email = user.email;
-        if (user?.user_metadata?.role) row.actor_role = user.user_metadata.role;
-        if (options?.branchId) row.branch_id = options.branchId;
-        if (options?.entityType) row.entity_type = options.entityType;
-        if (options?.entityId) row.entity_id = options.entityId;
+        if (user?.email) parsedDetails._actor_email = user.email;
+        if (user?.user_metadata?.role) parsedDetails._actor_role = user.user_metadata.role;
+        if (options?.branchId) parsedDetails._branch_id = options.branchId;
+
+        const row = {
+            action,
+            entity_type: options?.entityType || "SYSTEM",
+            entity_id: options?.entityId || null,
+            actor_id: user?.id || null,
+            details: JSON.stringify(parsedDetails),
+        };
 
         supabaseBrowser
             .from("audit_logs")

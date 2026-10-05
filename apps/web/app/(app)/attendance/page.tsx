@@ -6,15 +6,15 @@ import { supabaseBrowser } from "../../../lib/supabase/client";
 import { useTenant } from "../../../components/TenantContext";
 import type { Employee, Branch, AttendanceStatus } from "../../../lib/types";
 
-const STATUS_CONFIG: Record<AttendanceStatus | "-", { label: string; short: string; bg: string; color: string }> = {
-  PRESENT: { label: "Present", short: "P", bg: "#dcfce7", color: "#166534" },
-  ABSENT: { label: "Uninformed Absence", short: "A", bg: "#fee2e2", color: "#991b1b" },
-  HALF_DAY: { label: "Half Day", short: "H", bg: "#fef3c7", color: "#92400e" },
-  LATE: { label: "Late", short: "L", bg: "#fef9c3", color: "#854d0e" },
-  OT: { label: "Overtime", short: "O", bg: "#dbeafe", color: "#1e40af" },
-  LEAVE_APPROVED: { label: "Informed Approved", short: "✓", bg: "#e0e7ff", color: "#3730a3" },
-  LEAVE_UNAPPROVED: { label: "Informed Unapproved", short: "✗", bg: "#fce7f3", color: "#9d174d" },
-  "-": { label: "No Record", short: "-", bg: "var(--muted)", color: "var(--muted-foreground)" },
+const STATUS_CONFIG: Record<AttendanceStatus | "-", { label: string; short: string; bg: string; color: string; border?: string }> = {
+  PRESENT: { label: "Present", short: "P", bg: "#dcfce7", color: "#14532d", border: "#86efac" },
+  ABSENT: { label: "Uninformed Absence", short: "A", bg: "#fee2e2", color: "#7f1d1d", border: "#fca5a5" },
+  HALF_DAY: { label: "Half Day", short: "H", bg: "#fef3c7", color: "#78350f", border: "#fde68a" },
+  LATE: { label: "Late", short: "L", bg: "#fef9c3", color: "#713f12", border: "#fef08a" },
+  OT: { label: "Overtime", short: "O", bg: "#dbeafe", color: "#1e3a8a", border: "#bfdbfe" },
+  LEAVE_APPROVED: { label: "Informed Approved", short: "✓", bg: "#e0e7ff", color: "#312e81", border: "#c7d2fe" },
+  LEAVE_UNAPPROVED: { label: "Informed Unapproved", short: "✗", bg: "#fce7f3", color: "#831843", border: "#fbcfe8" },
+  "-": { label: "No Record", short: "-", bg: "#f3f4f6", color: "#1f2937", border: "#e5e7eb" },
 };
 
 interface AttendanceLogItem {
@@ -35,7 +35,7 @@ interface AttendanceLogItem {
 }
 
 export default function AttendancePage() {
-  const [employees, setEmployees] = useState<(Pick<Employee, "id" | "full_name" | "branch_id"> & { branches?: { name: string } | null })[]>([]);
+  const [employees, setEmployees] = useState<(Pick<Employee, "id" | "full_name" | "branch_id" | "shift_start" | "shift_end" | "total_working_hours"> & { branches?: { name: string } | null })[]>([]);
   const [logs, setLogs] = useState<AttendanceLogItem[]>([]);
   const [leaveRequests, setLeaveRequests] = useState<{ id: string; employee_id: string; start_date: string; end_date: string; status: string }[]>([]);
   const [branches, setBranches] = useState<Pick<Branch, "id" | "name">[]>([]);
@@ -101,7 +101,7 @@ interface PunchSessionItem {
     const lastDay = new Date(year, month + 1, 0).getDate();
     const endIST = `${year}-${pad(month + 1)}-${pad(lastDay)}T23:59:59+05:30`;
 
-    let empQuery = supabaseBrowser.from("employees").select("id, full_name, branch_id, branches(name)").eq("status", "ACTIVE");
+    let empQuery = supabaseBrowser.from("employees").select("id, full_name, branch_id, shift_start, shift_end, total_working_hours, branches(name)").eq("status", "ACTIVE");
     if (globalBranch) {
       empQuery = empQuery.eq("branch_id", globalBranch.id);
     }
@@ -181,36 +181,49 @@ interface PunchSessionItem {
     e.preventDefault();
     if (!manualForm.employee_id) { alert("Select an employee."); return; }
 
-    const checkInDate = new Date(`${manualForm.date}T${manualForm.check_in}:00`);
-    const checkOutDate = manualForm.check_out ? new Date(`${manualForm.date}T${manualForm.check_out}:00`) : null;
+    const pad = (n: number) => String(n).padStart(2, "0");
+    const startIST = `${manualForm.date}T00:00:00+05:30`;
+    const endIST = `${manualForm.date}T23:59:59+05:30`;
 
-    const { error } = await supabaseBrowser.from("attendance_logs").insert([{
-      employee_id: manualForm.employee_id,
-      branch_id: employees.find((e) => e.id === manualForm.employee_id)?.branch_id,
-      check_in: checkInDate.toISOString(),
-      check_out: checkOutDate?.toISOString() || null,
-      status: manualForm.status,
-      source: "MANUAL",
-    }]);
+    // Clear existing logs for this date to cleanly replace them
+    await supabaseBrowser.from("attendance_logs")
+      .delete()
+      .eq("employee_id", manualForm.employee_id)
+      .gte("check_in", startIST)
+      .lte("check_in", endIST);
 
-    if (!error) {
-      setShowManual(false);
-      loadData();
-    } else {
-      alert(error.message);
+    if (manualForm.status !== "ABSENT") {
+      const checkInTimeStr = manualForm.check_in || "09:00";
+      const checkInDate = new Date(`${manualForm.date}T${checkInTimeStr}:00+05:30`);
+      const checkOutDate = manualForm.check_out ? new Date(`${manualForm.date}T${manualForm.check_out}:00+05:30`) : null;
+
+      const { error } = await supabaseBrowser.from("attendance_logs").insert([{
+        employee_id: manualForm.employee_id,
+        branch_id: employees.find((e) => e.id === manualForm.employee_id)?.branch_id,
+        check_in: checkInDate.toISOString(),
+        check_out: checkOutDate?.toISOString() || null,
+        status: manualForm.status,
+        source: "MANUAL",
+      }]);
+
+      if (error) {
+        alert(error.message);
+        return;
+      }
     }
+
+    setShowManual(false);
+    loadData();
   };
 
   const getStatus = (empId: string, day: number): AttendanceStatus | "-" => {
-    // Check attendance_logs first
-    const log = logs.find(
-      (l) => l.employee_id === empId && new Date(l.check_in).getDate() === day
-    );
-    // If we have a definitive attendance status (present, late, etc.), use it
-    if (log && log.status !== "ABSENT") return log.status as AttendanceStatus;
+    const dayLogs = logs
+      .filter((l) => l.employee_id === empId && new Date(l.check_in).getDate() === day)
+      .sort((a, b) => new Date(a.check_in).getTime() - new Date(b.check_in).getTime());
 
-    // Check leave requests for this day
+    const emp = employees.find((e) => e.id === empId);
     const dayDate = new Date(year, month, day);
+
     const leave = leaveRequests.find((lr) => {
       if (lr.employee_id !== empId) return false;
       const start = new Date(lr.start_date + "T00:00:00");
@@ -218,14 +231,70 @@ interface PunchSessionItem {
       return dayDate >= start && dayDate <= end;
     });
 
+    if (dayLogs.length > 0) {
+      const firstLog = dayLogs[0];
+      const lastLog = dayLogs[dayLogs.length - 1];
+
+      if (firstLog.status === "ABSENT") {
+        return "ABSENT";
+      }
+
+      const shiftStart = emp?.shift_start || "09:00";
+      const shiftEnd = emp?.shift_end || "18:00";
+      const parseMins = (t: string) => {
+        const parts = t.split(":");
+        return parseInt(parts[0], 10) * 60 + parseInt(parts[1], 10);
+      };
+      const shiftStartMins = parseMins(shiftStart);
+      const shiftEndMins = parseMins(shiftEnd);
+      const expectedShiftMins = emp?.total_working_hours ? Math.round(emp.total_working_hours * 60) : Math.max(0, shiftEndMins - shiftStartMins);
+
+      const inDate = new Date(firstLog.check_in);
+      const inMins = inDate.getHours() * 60 + inDate.getMinutes();
+      const lateInMinutes = Math.max(0, inMins - shiftStartMins);
+
+      let workMinutes = 0;
+      let overtimeMinutes = 0;
+      let outMins = 0;
+
+      if (lastLog?.check_out) {
+        const outDate = new Date(lastLog.check_out);
+        outMins = outDate.getHours() * 60 + outDate.getMinutes();
+
+        let totalMs = 0;
+        dayLogs.forEach((l) => {
+          if (l.check_out) {
+            const diff = new Date(l.check_out).getTime() - new Date(l.check_in).getTime();
+            if (diff > 0) totalMs += diff;
+          }
+        });
+
+        if (totalMs > 0) {
+          workMinutes = Math.floor(totalMs / (1000 * 60));
+          if (workMinutes > expectedShiftMins) {
+            overtimeMinutes = workMinutes - expectedShiftMins;
+          }
+        }
+      }
+
+      if (lastLog?.check_out && workMinutes > 0 && workMinutes < expectedShiftMins * 0.55) {
+        return "HALF_DAY";
+      } else if (overtimeMinutes >= 60 && outMins >= shiftEndMins + 45) {
+        return "OT";
+      } else if (lateInMinutes > 15) {
+        return "LATE";
+      } else if (firstLog.status && firstLog.status !== "PRESENT") {
+        return firstLog.status as AttendanceStatus;
+      }
+      return "PRESENT";
+    }
+
     if (leave) {
       return leave.status === "APPROVED" ? "LEAVE_APPROVED" : "LEAVE_UNAPPROVED";
     }
 
-    // If there's an ABSENT log, it's uninformed
-    if (log) return "ABSENT";
-
-    return "-";
+    const isPastDate = new Date() >= new Date(year, month, day, 23, 59, 59);
+    return isPastDate ? "ABSENT" : "-";
   };
 
   const handleCellClick = (emp: typeof employees[0], day: number) => {
@@ -240,7 +309,7 @@ interface PunchSessionItem {
     });
 
     const dayLogs = logs
-      .filter((l) => l.employee_id === emp.id && new Date(l.check_in).getDate() === day)
+      .filter((l) => l.employee_id === emp.id && new Date(l.check_in).getDate() === day && l.status !== "ABSENT")
       .sort((a, b) => new Date(a.check_in).getTime() - new Date(b.check_in).getTime());
 
     let totalWorkedMinutes = 0;
@@ -382,50 +451,44 @@ interface PunchSessionItem {
             {[2024, 2025, 2026].map((y) => <option key={y} value={y}>{y}</option>)}
           </select>
         </div>
-        <div className="flex gap-4 ml-auto">
+        <div className="flex gap-4 ml-auto flex-wrap">
           <div className="card stat-card py-2 px-4 min-w-[80px]">
-            <span className="stat-label text-[0.65rem]">Present</span>
-            <span className="stat-value text-xl">{statPresent}</span>
+            <span className="stat-label text-[0.7rem] font-bold text-foreground uppercase tracking-wider">Present</span>
+            <span className="stat-value text-xl font-extrabold" style={{ color: "#14532d" }}>{statPresent}</span>
           </div>
           <div className="card stat-card py-2 px-4 min-w-[80px]">
-            <span className="stat-label text-[0.65rem]">Absent</span>
-            <span className="stat-value text-xl text-destructive">{statAbsent}</span>
+            <span className="stat-label text-[0.7rem] font-bold text-foreground uppercase tracking-wider">Absent</span>
+            <span className="stat-value text-xl font-extrabold" style={{ color: "#7f1d1d" }}>{statAbsent}</span>
           </div>
           <div className="card stat-card py-2 px-4 min-w-[80px]">
-            <span className="stat-label text-[0.65rem]">Appr. Leave</span>
-            <span className="stat-value text-xl" style={{color: "#3730a3"}}>{statApprLeave}</span>
+            <span className="stat-label text-[0.7rem] font-bold text-foreground uppercase tracking-wider">Appr. Leave</span>
+            <span className="stat-value text-xl font-extrabold" style={{ color: "#312e81" }}>{statApprLeave}</span>
           </div>
           <div className="card stat-card py-2 px-4 min-w-[80px]">
-            <span className="stat-label text-[0.65rem]">Unappr. Leave</span>
-            <span className="stat-value text-xl" style={{color: "#9d174d"}}>{statUnapprLeave}</span>
+            <span className="stat-label text-[0.7rem] font-bold text-foreground uppercase tracking-wider">Unappr. Leave</span>
+            <span className="stat-value text-xl font-extrabold" style={{ color: "#831843" }}>{statUnapprLeave}</span>
           </div>
           <div className="card stat-card py-2 px-4 min-w-[80px]">
-            <span className="stat-label text-[0.65rem]">OT</span>
-            <span className="stat-value text-xl">{statOT}</span>
+            <span className="stat-label text-[0.7rem] font-bold text-foreground uppercase tracking-wider">OT</span>
+            <span className="stat-value text-xl font-extrabold" style={{ color: "#1e3a8a" }}>{statOT}</span>
           </div>
         </div>
       </div>
 
       {/* Attendance Grid */}
-      <div className="card overflow-x-auto p-0">
+      <div className="card overflow-x-auto p-0 border border-border">
         {loading ? (
-          <p className="p-8 text-center text-muted-foreground">Loading records...</p>
+          <p className="p-8 text-center text-foreground font-semibold">Loading records...</p>
         ) : employees.length === 0 ? (
-          <p className="p-8 text-center text-muted-foreground">No employees found for this filter.</p>
+          <p className="p-8 text-center text-foreground font-semibold">No employees found for this filter.</p>
         ) : (
           <table className="role-table text-xs">
             <thead>
               <tr>
-                <th className="min-w-[160px] sticky left-0 bg-card z-[2]">Employee</th>
+                <th className="min-w-[160px] sticky left-0 bg-card z-[2] font-extrabold text-foreground border-b border-r border-border">Employee</th>
                 {Array.from({ length: DAYS_IN_MONTH }).map((_, i) => (
-                  <th key={i} className="text-center w-[30px] p-1">
-                    <Link 
-                      href={`/attendance/daily/${year}-${String(month + 1).padStart(2, "0")}-${String(i + 1).padStart(2, "0")}`}
-                      className="hover:bg-muted/50 w-full h-full rounded py-1 transition-colors cursor-pointer text-primary hover:text-primary/80 font-bold inline-block"
-                      title="View Daily Sheet"
-                    >
-                      {i + 1}
-                    </Link>
+                  <th key={i} className="text-center w-[30px] p-1 font-extrabold text-foreground border-b border-border">
+                    {i + 1}
                   </th>
                 ))}
               </tr>
@@ -433,9 +496,9 @@ interface PunchSessionItem {
             <tbody>
               {employees.map((emp) => (
                 <tr key={emp.id}>
-                  <td className="sticky left-0 bg-card z-[1]">
-                    <div><strong>{emp.full_name}</strong></div>
-                    <div className="text-muted-foreground text-[0.65rem]">{emp.branches?.name}</div>
+                  <td className="sticky left-0 bg-card z-[1] border-r border-border">
+                    <div><strong className="text-foreground font-bold">{emp.full_name}</strong></div>
+                    <div className="text-foreground/80 font-semibold text-[0.68rem]">{emp.branches?.name}</div>
                   </td>
                   {Array.from({ length: DAYS_IN_MONTH }).map((_, i) => {
                     const status = getStatus(emp.id, i + 1);
@@ -446,8 +509,8 @@ interface PunchSessionItem {
                           type="button"
                           onClick={() => handleCellClick(emp, i + 1)}
                           title={`Day ${i + 1}: ${cfg.label} (Click for entry details)`}
-                          className="w-6 h-6 rounded grid place-items-center font-semibold text-[0.6rem] mx-auto cursor-pointer transition-all duration-150 hover:scale-125 hover:shadow-md hover:ring-2 hover:ring-primary/60 focus:outline-none select-none border-0"
-                          style={{ background: cfg.bg, color: cfg.color }}
+                          className="w-6 h-6 rounded-xs grid place-items-center font-extrabold text-[0.65rem] mx-auto cursor-pointer transition-all duration-150 hover:scale-125 hover:shadow-md hover:ring-2 hover:ring-primary/60 focus:outline-none select-none border"
+                          style={{ background: cfg.bg, color: cfg.color, borderColor: cfg.border || "currentColor" }}
                         >
                           {cfg.short}
                         </button>
@@ -462,11 +525,11 @@ interface PunchSessionItem {
       </div>
 
       {/* Legend */}
-      <div className="mt-6 flex gap-4 flex-wrap">
+      <div className="mt-6 flex gap-3 flex-wrap">
         {(Object.entries(STATUS_CONFIG) as [string, typeof STATUS_CONFIG["-"]][]).filter(([k]) => k !== "-").map(([key, cfg]) => (
-          <div key={key} className="flex items-center gap-2">
-            <div className="w-3.5 h-3.5 rounded-sm" style={{ background: cfg.bg }} />
-            <span className="text-muted-foreground text-[0.8rem]">{cfg.short} — {cfg.label}</span>
+          <div key={key} className="flex items-center gap-2 bg-card px-2.5 py-1.5 border border-border rounded-xs shadow-xs">
+            <div className="w-4 h-4 rounded-xs border" style={{ background: cfg.bg, borderColor: cfg.border || "currentColor" }} />
+            <span className="text-foreground font-bold text-xs">{cfg.short} — {cfg.label}</span>
           </div>
         ))}
       </div>
@@ -610,10 +673,10 @@ interface PunchSessionItem {
             </div>
 
             {/* Footer Action */}
-            <div className="pt-2 border-t border-border">
+            <div className="pt-2 border-t border-border flex flex-col gap-2">
               <Link
                 href={`/attendance/employee/${selectedEntry.employee.id}?month=${month}&year=${year}`}
-                className="w-full py-2.5 px-3 bg-secondary text-foreground hover:bg-secondary/80 border border-border font-semibold text-xs flex items-center justify-between transition-colors no-underline focus-visible:ring-2 focus-visible:ring-primary focus:outline-none"
+                className="w-full py-2.5 px-3 bg-muted/60 text-foreground hover:bg-muted border border-border/80 font-bold text-xs flex items-center justify-between transition-colors no-underline rounded-md focus-visible:ring-2 focus-visible:ring-primary focus:outline-none"
               >
                 <span className="flex items-center gap-2">
                   <span aria-hidden="true">📅</span>

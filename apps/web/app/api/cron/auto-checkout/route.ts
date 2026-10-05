@@ -47,8 +47,11 @@ async function handlePreCheckAlert() {
 
     const { data: unclosedLogs, error: fetchError } = await supabase
       .from("attendance_logs")
-      .select("id, employee_id, check_in, metadata, branch_id, employees(full_name), branches(name)")
-      .is("check_out", null);
+      .select("id, employee_id, check_in, status, metadata, branch_id, employees(full_name), branches(name)")
+      .is("check_out", null)
+      .neq("status", "ABSENT")
+      .neq("status", "LEAVE_APPROVED")
+      .neq("status", "LEAVE_UNAPPROVED");
 
     if (fetchError) {
       return NextResponse.json({ error: fetchError.message }, { status: 500 });
@@ -58,6 +61,9 @@ async function handlePreCheckAlert() {
     const staffNames: string[] = [];
 
     for (const log of (unclosedLogs as any[]) || []) {
+      if (log.status === "ABSENT" || log.status === "LEAVE_APPROVED" || log.status === "LEAVE_UNAPPROVED") {
+        continue;
+      }
       const isExcluded = Boolean(log.metadata?.exclude_from_auto_checkout);
       if (isExcluded) continue;
 
@@ -145,8 +151,11 @@ async function handleAutoCheckout() {
     // Fetch unclosed punches with employee info
     const { data: unclosedLogs, error: fetchError } = await supabase
       .from("attendance_logs")
-      .select("id, employee_id, check_in, metadata, branch_id, employees(full_name), branches(name)")
-      .is("check_out", null);
+      .select("id, employee_id, check_in, status, metadata, branch_id, employees(full_name), branches(name)")
+      .is("check_out", null)
+      .neq("status", "ABSENT")
+      .neq("status", "LEAVE_APPROVED")
+      .neq("status", "LEAVE_UNAPPROVED");
 
     if (fetchError) {
       return NextResponse.json({ error: fetchError.message }, { status: 500 });
@@ -157,6 +166,9 @@ async function handleAutoCheckout() {
     const staffNames: string[] = [];
 
     for (const log of (unclosedLogs as any[]) || []) {
+      if (log.status === "ABSENT" || log.status === "LEAVE_APPROVED" || log.status === "LEAVE_UNAPPROVED") {
+        continue;
+      }
       const existingMeta =
         typeof log.metadata === "object" && log.metadata !== null ? log.metadata : {};
 

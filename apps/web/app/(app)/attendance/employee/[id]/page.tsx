@@ -14,14 +14,14 @@ const MONTH_NAMES = [
 ];
 
 const STATUS_CONFIG: Record<string, { label: string; short: string; bg: string; color: string; border: string }> = {
-  PRESENT: { label: "Present", short: "P", bg: "#dcfce7", color: "#166534", border: "#bbf7d0" },
-  ABSENT: { label: "Absent", short: "A", bg: "#fee2e2", color: "#991b1b", border: "#fecaca" },
-  HALF_DAY: { label: "Half Day", short: "HD", bg: "#fef3c7", color: "#92400e", border: "#fde68a" },
-  LATE: { label: "Late In", short: "L", bg: "#ffedd5", color: "#9a3412", border: "#fed7aa" },
-  OT: { label: "Overtime", short: "OT", bg: "#ede9fe", color: "#5b21b6", border: "#ddd6fe" },
-  LEAVE_APPROVED: { label: "Approved Leave", short: "L(A)", bg: "#dbeafe", color: "#1e40af", border: "#bfdbfe" },
-  LEAVE_UNAPPROVED: { label: "Unapproved Leave", short: "L(U)", bg: "#fce7f3", color: "#9d174d", border: "#fbcfe8" },
-  "-": { label: "No Record", short: "-", bg: "#f1f5f9", color: "#64748b", border: "#e2e8f0" },
+  PRESENT: { label: "Present", short: "P", bg: "#dcfce7", color: "#14532d", border: "#86efac" },
+  ABSENT: { label: "Absent", short: "A", bg: "#fee2e2", color: "#7f1d1d", border: "#fca5a5" },
+  HALF_DAY: { label: "Half Day", short: "HD", bg: "#fef3c7", color: "#78350f", border: "#fde68a" },
+  LATE: { label: "Late In", short: "L", bg: "#fef9c3", color: "#713f12", border: "#fef08a" },
+  OT: { label: "Overtime", short: "OT", bg: "#dbeafe", color: "#1e3a8a", border: "#bfdbfe" },
+  LEAVE_APPROVED: { label: "Approved Leave", short: "L(A)", bg: "#e0e7ff", color: "#312e81", border: "#c7d2fe" },
+  LEAVE_UNAPPROVED: { label: "Unapproved Leave", short: "L(U)", bg: "#fce7f3", color: "#831843", border: "#fbcfe8" },
+  "-": { label: "No Record", short: "-", bg: "#f3f4f6", color: "#1f2937", border: "#e5e7eb" },
 };
 
 interface EmployeeDetails {
@@ -231,7 +231,15 @@ export default function EmployeeMonthlyAttendancePage() {
       let status: AttendanceStatus | "-" = "-";
       let deviceId = "—";
 
-      if (firstLog) {
+      if (firstLog && firstLog.status === "ABSENT") {
+        inTimeDisplay = "—";
+        outTimeDisplay = "—";
+        lateInDisplay = "—";
+        earlyOutDisplay = "—";
+        workAndOTDisplay = "—";
+        overtimeDisplay = "—";
+        status = "ABSENT";
+      } else if (firstLog) {
         const inDate = new Date(firstLog.check_in);
         inTimeDisplay = inDate.toLocaleTimeString("en-IN", {
           hour: "2-digit",
@@ -251,7 +259,8 @@ export default function EmployeeMonthlyAttendancePage() {
         deviceId = (meta?.device_id as string) || (meta?.device as string) || (firstLog.source === "BIOMETRIC" ? "Biometric Device" : firstLog.source);
       }
 
-      if (lastLog?.check_out) {
+      let outMins = 0;
+      if (firstLog?.status !== "ABSENT" && lastLog?.check_out) {
         const outDate = new Date(lastLog.check_out);
         outTimeDisplay = outDate.toLocaleTimeString("en-IN", {
           hour: "2-digit",
@@ -259,7 +268,7 @@ export default function EmployeeMonthlyAttendancePage() {
           hour12: true,
         });
 
-        const outMins = outDate.getHours() * 60 + outDate.getMinutes();
+        outMins = outDate.getHours() * 60 + outDate.getMinutes();
         if (outMins < shiftEndMins - 5) {
           earlyOutMinutes = shiftEndMins - outMins;
           earlyOutDisplay = `${earlyOutMinutes}m Early`;
@@ -284,7 +293,7 @@ export default function EmployeeMonthlyAttendancePage() {
             overtimeDisplay = formatMinutesToHours(overtimeMinutes);
           }
         }
-      } else if (firstLog && !lastLog?.check_out) {
+      } else if (firstLog && firstLog.status !== "ABSENT" && !lastLog?.check_out) {
         outTimeDisplay = "In Progress";
         const diffMs = Date.now() - new Date(firstLog.check_in).getTime();
         if (diffMs > 0) {
@@ -294,12 +303,16 @@ export default function EmployeeMonthlyAttendancePage() {
       }
 
       if (firstLog) {
-        if (overtimeMinutes >= 60) {
+        if (firstLog.status === "ABSENT") {
+          status = "ABSENT";
+        } else if (lastLog?.check_out && workMinutes > 0 && workMinutes < expectedShiftDurationMins * 0.55) {
+          status = "HALF_DAY";
+        } else if (overtimeMinutes >= 60 && outMins >= shiftEndMins + 45) {
           status = "OT";
-        } else if (firstLog.status) {
-          status = firstLog.status;
-        } else if (lateInMinutes > 45) {
+        } else if (lateInMinutes > 15) {
           status = "LATE";
+        } else if (firstLog.status && firstLog.status !== "PRESENT") {
+          status = firstLog.status;
         } else {
           status = "PRESENT";
         }
@@ -387,7 +400,7 @@ export default function EmployeeMonthlyAttendancePage() {
         {
           id: null,
           checkIn: employee?.shift_start?.substring(0, 5) || "09:00",
-          checkOut: employee?.shift_end?.substring(0, 5) || "18:00",
+          checkOut: "",
           status: "PRESENT",
         },
       ];
@@ -407,14 +420,11 @@ export default function EmployeeMonthlyAttendancePage() {
     if (!editModal) return;
     const lastSession = editModal.punches[editModal.punches.length - 1];
     let newIn = "19:00";
-    let newOut = "21:00";
 
     if (lastSession && lastSession.checkOut) {
       const parts = lastSession.checkOut.split(":");
       const nextH = Math.min(23, parseInt(parts[0], 10) + 1);
-      const nextEndH = Math.min(23, nextH + 2);
       newIn = `${String(nextH).padStart(2, "0")}:00`;
-      newOut = `${String(nextEndH).padStart(2, "0")}:00`;
     }
 
     setEditModal({
@@ -424,7 +434,7 @@ export default function EmployeeMonthlyAttendancePage() {
         {
           id: null,
           checkIn: newIn,
-          checkOut: newOut,
+          checkOut: "",
           status: editModal.overallStatus,
         },
       ],
@@ -504,26 +514,32 @@ export default function EmployeeMonthlyAttendancePage() {
         },
       ]);
     } else {
-      const inserts = punches
-        .filter((p) => p.checkIn)
-        .map((p, idx) => {
-          const inISO = new Date(`${dateStr}T${p.checkIn}:00+05:30`).toISOString();
-          const outISO = p.checkOut ? new Date(`${dateStr}T${p.checkOut}:00+05:30`).toISOString() : null;
+      const validPunches = punches.filter((p) => p.checkIn || p.checkOut);
+      if (validPunches.length === 0) {
+        alert("Please enter at least a Check-IN or Check-OUT time.");
+        setSavingPunch(false);
+        return;
+      }
 
-          return {
-            employee_id: employee.id,
-            branch_id: employee.branch_id || globalBranch?.id,
-            check_in: inISO,
-            check_out: outISO,
-            status: overallStatus,
-            source: "MANUAL",
-            metadata: {
-              modified_by: "ADMIN",
-              session_index: idx + 1,
-              note: punches.length > 1 ? `Session ${idx + 1} of ${punches.length}` : "Manual entry",
-            },
-          };
-        });
+      const inserts = validPunches.map((p, idx) => {
+        const timeForIn = p.checkIn || p.checkOut;
+        const inISO = new Date(`${dateStr}T${timeForIn}:00+05:30`).toISOString();
+        const outISO = p.checkOut ? new Date(`${dateStr}T${p.checkOut}:00+05:30`).toISOString() : null;
+
+        return {
+          employee_id: employee.id,
+          branch_id: employee.branch_id || globalBranch?.id,
+          check_in: inISO,
+          check_out: outISO,
+          status: overallStatus,
+          source: "MANUAL",
+          metadata: {
+            modified_by: "ADMIN",
+            session_index: idx + 1,
+            note: punches.length > 1 ? `Session ${idx + 1} of ${punches.length}` : "Manual entry",
+          },
+        };
+      });
 
       if (inserts.length > 0) {
         await supabaseBrowser.from("attendance_logs").insert(inserts);
@@ -741,19 +757,7 @@ export default function EmployeeMonthlyAttendancePage() {
             </button>
           </div>
 
-          <button
-            type="button"
-            onClick={() => {
-              const todayDay = new Date().getDate();
-              const rec = dayRecords.find((r) => r.day === todayDay) || dayRecords[0];
-              if (rec) handleOpenEdit(rec);
-            }}
-            className="button button-secondary flex items-center gap-1.5 text-xs md:text-sm font-bold shadow-2xs focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
-            aria-label="Add or modify punch entries"
-          >
-            <span>+</span>
-            <span>Add / Edit Punch</span>
-          </button>
+
 
           <button
             type="button"
@@ -1124,7 +1128,6 @@ export default function EmployeeMonthlyAttendancePage() {
                             type="time"
                             value={punch.checkIn}
                             onChange={(e) => handleUpdatePunchField(idx, "checkIn", e.target.value)}
-                            required
                             className="input text-xs font-semibold py-1 px-2 h-7.5"
                           />
                         </div>

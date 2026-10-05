@@ -65,14 +65,16 @@ export default function LoansPage() {
             loanQuery = loanQuery.eq("employees.branch_id", globalBranch.id);
         }
 
-        const [emps, loansData, periodsData] = await Promise.all([
+        const [emps, loansData, periodsData, payslipsData] = await Promise.all([
             empQuery,
             loanQuery,
             supabaseBrowser.from("payroll_periods").select("id, month, year").eq("status", "LOCKED"),
+            supabaseBrowser.from("payslips").select("employee_id, loan_deduction, payroll_periods!inner(month, year, status)").eq("payroll_periods.status", "LOCKED"),
         ]);
         setEmployees((emps.data as Pick<Employee, "id" | "full_name">[]) || []);
         setLoans((loansData.data as Loan[]) || []);
         setPeriods((periodsData.data || []) as { id: string; month: number; year: number }[]);
+        setPayslips((payslipsData.data || []) as any[]);
         setLoading(false);
     }
 
@@ -161,6 +163,14 @@ export default function LoansPage() {
         setSchedule([]);
     };
 
+    const getEffectiveBalance = (loan: Loan): number => {
+        if (loan.status === "CLOSED" || loan.status === "WRITTEN_OFF") return 0;
+        const totalDeducted = payslips
+            .filter((p: any) => p.employee_id === loan.employee_id)
+            .reduce((sum: number, p: any) => sum + Number(p.loan_deduction || 0), 0);
+        return Math.max(0, Number(loan.amount) - totalDeducted);
+    };
+
     const activeLoans = loans.filter((l) => l.status === "ACTIVE");
     const filteredLoans = statusFilter === "ALL" ? loans : loans.filter(l => (l.status || "ACTIVE") === statusFilter);
 
@@ -176,10 +186,18 @@ export default function LoansPage() {
     const currentMonth = new Date().getMonth() + 1;
     const years = [currentYear, currentYear + 1, currentYear + 2];
 
-    // Determine installment status
-    const getInstallmentStatus = (entry: RepaymentEntry): "DEDUCTED" | "UPCOMING" | "OVERDUE" => {
-        const isLockedPeriod = periods.some(p => p.month === entry.month && p.year === entry.year);
-        if (isLockedPeriod) return "DEDUCTED";
+    // Determine installment status accurately per employee payslip record
+    const getInstallmentStatus = (loan: Loan | null, entry: RepaymentEntry): "DEDUCTED" | "UPCOMING" | "OVERDUE" => {
+        if (loan?.status === "CLOSED") return "DEDUCTED";
+        if (loan?.employee_id) {
+            const hasDeduction = payslips.some((p: any) =>
+                p.employee_id === loan.employee_id &&
+                p.payroll_periods?.month === entry.month &&
+                p.payroll_periods?.year === entry.year &&
+                Number(p.loan_deduction) > 0
+            );
+            if (hasDeduction) return "DEDUCTED";
+        }
         const entryDate = entry.year * 12 + entry.month;
         const currentDate = currentYear * 12 + currentMonth;
         if (entryDate < currentDate) return "OVERDUE";
@@ -229,7 +247,7 @@ export default function LoansPage() {
                 </div>
                 <div className="card stat-card">
                     <span className="stat-label">Outstanding Balance</span>
-                    <span className="stat-value">₹{activeLoans.reduce((a, l) => a + Number(l.balance_amount), 0).toLocaleString("en-IN")}</span>
+                    <span className="stat-value">₹{activeLoans.reduce((a, l) => a + getEffectiveBalance(l), 0).toLocaleString("en-IN")}</span>
                 </div>
                 <div className="card stat-card">
                     <span className="stat-label">Total Ledgers</span>
@@ -253,9 +271,17 @@ export default function LoansPage() {
                     </thead>
                     <tbody>
                         {loading ? (
-                            <tr><td colSpan={8} className="centered h-32">Loading ledgers...</td></tr>
+                            <tr>
+                                <td colSpan={8} className="text-center align-middle h-32 text-muted-foreground">
+                                    Loading ledgers...
+                                </td>
+                            </tr>
                         ) : filteredLoans.length === 0 ? (
-                            <tr><td colSpan={8} className="centered h-32">No {statusFilter === "ALL" ? "" : statusFilter.toLowerCase()} records found.</td></tr>
+                            <tr>
+                                <td colSpan={8} className="text-center align-middle h-32 text-muted-foreground">
+                                    No {statusFilter === "ALL" ? "" : statusFilter.toLowerCase()} records found.
+                                </td>
+                            </tr>
                         ) : (
                             filteredLoans.map((loan) => (
                                 <tr key={loan.id} className={loan.status === "WRITTEN_OFF" ? "opacity-50" : ""}>
@@ -273,7 +299,7 @@ export default function LoansPage() {
                                             </span>
                                         )}
                                     </td>
-                                    <td>₹{Number(loan.balance_amount).toLocaleString("en-IN")}</td>
+                                    <td>₹{getEffectiveBalance(loan).toLocaleString("en-IN")}</td>
                                     <td>
                                         <span className={`pill ${loan.status === "ACTIVE" ? "pill-warning" : loan.status === "WRITTEN_OFF" ? "pill-destructive" : "pill-success"}`}>
                                             {loan.status}
@@ -443,7 +469,7 @@ export default function LoansPage() {
                                 </div>
                                 <div>
                                     <span className="text-xs text-muted-foreground uppercase tracking-wider">Balance</span>
-                                    <p className="font-semibold text-lg">₹{Number(viewLoan.balance_amount).toLocaleString("en-IN")}</p>
+                                    <p className="font-semibold text-lg">₹{getEffectiveBalance(viewLoan).toLocaleString("en-IN")}</p>
                                 </div>
                                 <div>
                                     <span className="text-xs text-muted-foreground uppercase tracking-wider">Status</span>
@@ -469,13 +495,13 @@ export default function LoansPage() {
                                     <h4 className="text-sm font-bold mb-3">Deduction Schedule</h4>
                                     <div className="flex justify-between items-center bg-background p-3 rounded border border-border/50">
                                         <div className="flex items-center gap-2">
-                                            <span>{statusIcon(getInstallmentStatus({ month: viewLoan.deduction_month || 1, year: viewLoan.deduction_year || currentYear, amount: Number(viewLoan.amount) }))}</span>
+                                            <span>{statusIcon(getInstallmentStatus(viewLoan, { month: viewLoan.deduction_month || 1, year: viewLoan.deduction_year || currentYear, amount: Number(viewLoan.amount) }))}</span>
                                             <span className="font-medium">{months[(viewLoan.deduction_month || 1) - 1]} {viewLoan.deduction_year}</span>
                                         </div>
                                         <div className="text-right">
                                             <span className="font-bold">₹{Number(viewLoan.amount).toLocaleString("en-IN")}</span>
-                                            <span className={`ml-2 text-xs ${getInstallmentStatus({ month: viewLoan.deduction_month || 1, year: viewLoan.deduction_year || currentYear, amount: Number(viewLoan.amount) }) === "DEDUCTED" ? "text-green-600" : "text-amber-600"}`}>
-                                                {statusLabel(getInstallmentStatus({ month: viewLoan.deduction_month || 1, year: viewLoan.deduction_year || currentYear, amount: Number(viewLoan.amount) }))}
+                                            <span className={`ml-2 text-xs ${getInstallmentStatus(viewLoan, { month: viewLoan.deduction_month || 1, year: viewLoan.deduction_year || currentYear, amount: Number(viewLoan.amount) }) === "DEDUCTED" ? "text-green-600" : "text-amber-600"}`}>
+                                                {statusLabel(getInstallmentStatus(viewLoan, { month: viewLoan.deduction_month || 1, year: viewLoan.deduction_year || currentYear, amount: Number(viewLoan.amount) }))}
                                             </span>
                                         </div>
                                     </div>
@@ -485,7 +511,7 @@ export default function LoansPage() {
                                     <h4 className="text-sm font-bold mb-3">Deduction Schedule</h4>
                                     <div className="space-y-1.5 max-h-[250px] overflow-y-auto pr-1">
                                         {(viewLoan.repayment_schedule as RepaymentEntry[]).map((s, idx) => {
-                                            const st = getInstallmentStatus(s);
+                                            const st = getInstallmentStatus(viewLoan, s);
                                             return (
                                                 <div key={idx} className={`flex justify-between items-center p-2.5 rounded border text-sm ${st === "DEDUCTED" ? "bg-green-50 border-green-200" : st === "OVERDUE" ? "bg-amber-50 border-amber-200" : "bg-background border-border/50"}`}>
                                                     <div className="flex items-center gap-2">
@@ -504,9 +530,9 @@ export default function LoansPage() {
                                         })}
                                     </div>
                                     <div className="mt-3 pt-3 border-t border-border grid grid-cols-3 gap-2 text-center text-xs">
-                                        <div><span className="font-bold text-green-600">{(viewLoan.repayment_schedule as RepaymentEntry[]).filter(s => getInstallmentStatus(s) === "DEDUCTED").length}</span> <span className="text-muted-foreground">Deducted</span></div>
-                                        <div><span className="font-bold text-amber-600">{(viewLoan.repayment_schedule as RepaymentEntry[]).filter(s => getInstallmentStatus(s) === "OVERDUE").length}</span> <span className="text-muted-foreground">Overdue</span></div>
-                                        <div><span className="font-bold text-muted-foreground">{(viewLoan.repayment_schedule as RepaymentEntry[]).filter(s => getInstallmentStatus(s) === "UPCOMING").length}</span> <span className="text-muted-foreground">Upcoming</span></div>
+                                        <div><span className="font-bold text-green-600">{(viewLoan.repayment_schedule as RepaymentEntry[]).filter(s => getInstallmentStatus(viewLoan, s) === "DEDUCTED").length}</span> <span className="text-muted-foreground">Deducted</span></div>
+                                        <div><span className="font-bold text-amber-600">{(viewLoan.repayment_schedule as RepaymentEntry[]).filter(s => getInstallmentStatus(viewLoan, s) === "OVERDUE").length}</span> <span className="text-muted-foreground">Overdue</span></div>
+                                        <div><span className="font-bold text-muted-foreground">{(viewLoan.repayment_schedule as RepaymentEntry[]).filter(s => getInstallmentStatus(viewLoan, s) === "UPCOMING").length}</span> <span className="text-muted-foreground">Upcoming</span></div>
                                     </div>
                                 </div>
                             ) : null}

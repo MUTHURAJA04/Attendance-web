@@ -14,28 +14,52 @@ interface PayslipModalProps {
 
 export function PayslipModal({ isOpen, onClose, payslip, period }: PayslipModalProps) {
     const [loanBalance, setLoanBalance] = useState<number>(0);
+    const [loanBreakdown, setLoanBreakdown] = useState<{ loanEmi: number; advance: number }>({ loanEmi: 0, advance: 0 });
 
     useEffect(() => {
         async function fetchLoanBalance() {
-            if (!payslip?.employee_id) return;
+            if (!payslip?.employee_id || !period) return;
             const { data, error } = await supabaseBrowser
                 .from("loans")
-                .select("balance_amount")
-                .eq("employee_id", payslip.employee_id)
-                .eq("status", "ACTIVE");
+                .select("*")
+                .eq("employee_id", payslip.employee_id);
 
             if (!error && data && data.length > 0) {
-                const totalBal = data.reduce((sum, l) => sum + Number(l.balance_amount || 0), 0);
-                setLoanBalance(totalBal);
+                let activeBal = 0;
+                let loanEmi = 0;
+                let advance = 0;
+
+                for (const l of data) {
+                    if (l.status === "ACTIVE") {
+                        activeBal += Number(l.balance_amount || 0);
+                    }
+                    if (l.type === "ADVANCE") {
+                        if (Number(l.deduction_month) === period.month && Number(l.deduction_year) === period.year) {
+                            advance += Number(l.amount || 0);
+                        }
+                    } else {
+                        const sched = (l.repayment_schedule || []) as any[];
+                        const match = sched.find((s: any) => Number(s.month) === period.month && Number(s.year) === period.year);
+                        if (match) {
+                            loanEmi += Number(match.amount || 0);
+                        } else if (l.monthly_emi) {
+                            loanEmi += Number(l.monthly_emi || 0);
+                        }
+                    }
+                }
+
+                setLoanBalance(activeBal);
+                setLoanBreakdown({ loanEmi, advance });
             } else {
                 setLoanBalance(0);
+                setLoanBreakdown({ loanEmi: Number(payslip.loan_deduction || 0), advance: 0 });
             }
         }
 
         if (isOpen && payslip?.employee_id) {
             fetchLoanBalance();
         }
-    }, [isOpen, payslip?.employee_id, payslip?.id]);
+    }, [isOpen, payslip?.employee_id, payslip?.id, period]);
 
     const handlePrint = () => {
         document.body.classList.add("printing-payslip");
@@ -148,10 +172,28 @@ export function PayslipModal({ isOpen, onClose, payslip, period }: PayslipModalP
                                     <span>ESIC</span>
                                     <span className="print:text-black">₹{Number(payslip.esi_deduction || 0).toLocaleString("en-IN")}</span>
                                 </div>
-                                <div className="flex justify-between py-2 border-b border-border/50">
-                                    <span>Loan Repayment EMI</span>
-                                    <span className="print:text-black">₹{Number(payslip.loan_deduction || 0).toLocaleString("en-IN")}</span>
-                                </div>
+                                {loanBreakdown.advance > 0 && loanBreakdown.loanEmi > 0 ? (
+                                    <>
+                                        <div className="flex justify-between py-2 border-b border-border/50">
+                                            <span>Loan Repayment EMI</span>
+                                            <span className="print:text-black">₹{loanBreakdown.loanEmi.toLocaleString("en-IN")}</span>
+                                        </div>
+                                        <div className="flex justify-between py-2 border-b border-border/50">
+                                            <span>Salary Advance Recovery</span>
+                                            <span className="print:text-black">₹{loanBreakdown.advance.toLocaleString("en-IN")}</span>
+                                        </div>
+                                    </>
+                                ) : loanBreakdown.advance > 0 ? (
+                                    <div className="flex justify-between py-2 border-b border-border/50">
+                                        <span>Salary Advance Recovery</span>
+                                        <span className="print:text-black">₹{Number(payslip.loan_deduction || 0).toLocaleString("en-IN")}</span>
+                                    </div>
+                                ) : (
+                                    <div className="flex justify-between py-2 border-b border-border/50">
+                                        <span>Loan Repayment EMI</span>
+                                        <span className="print:text-black">₹{Number(payslip.loan_deduction || 0).toLocaleString("en-IN")}</span>
+                                    </div>
+                                )}
                                 <div className="flex justify-between py-2 border-b border-border/50">
                                     <span>Professional Tax (PT)</span>
                                     <span className="print:text-black">₹{Number(payslip.pt_deduction || 0).toLocaleString("en-IN")}</span>
@@ -163,7 +205,7 @@ export function PayslipModal({ isOpen, onClose, payslip, period }: PayslipModalP
                                 <div className="flex justify-between py-2 border-b border-border/50 col-span-1 md:col-span-2 print:col-span-2 font-medium text-foreground print:text-black">
                                     <span>Balance Loan</span>
                                     <span className="font-semibold text-foreground print:text-black">
-                                        ₹{Number(loanBalance).toLocaleString("en-IN")}
+                                        ₹{Math.max(0, Number(loanBalance) - Number(payslip.loan_deduction || 0)).toLocaleString("en-IN")}
                                     </span>
                                 </div>
                             </div>

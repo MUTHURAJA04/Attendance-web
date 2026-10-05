@@ -93,7 +93,7 @@ export async function GET() {
     }
 
     const { data: allBrands } = await supabase.from("brands").select("id, name");
-    const { data: allBranches } = await supabase.from("branches").select("id, name, brand_id");
+    const { data: allBranches } = await supabase.from("branches").select("id, name, brand_id, city");
 
     const brandMap = new Map((allBrands || []).map((b) => [b.id, b.name]));
     const branchMap = new Map((allBranches || []).map((br) => [br.id, br.name]));
@@ -149,7 +149,12 @@ export async function GET() {
       };
     });
 
-    return NextResponse.json({ success: true, users: formatted });
+    return NextResponse.json({
+      success: true,
+      users: formatted,
+      brands: allBrands || [],
+      branches: allBranches || [],
+    });
   } catch (err: any) {
     return NextResponse.json(
       { error: err?.message || "Failed to list users" },

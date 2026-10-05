@@ -71,6 +71,7 @@ BEGIN
     LEFT JOIN employees e ON e.id = a.employee_id
     LEFT JOIN branches b ON b.id = a.branch_id
     WHERE a.check_out IS NULL
+      AND COALESCE(a.status, '') NOT IN ('ABSENT', 'LEAVE_APPROVED', 'LEAVE_UNAPPROVED')
       AND COALESCE((a.metadata->>'exclude_from_auto_checkout')::boolean, false) = false
       AND (
         -- Either check_in was on a previous date (past day unclosed punch)
@@ -201,6 +202,7 @@ BEGIN
     LEFT JOIN employees e ON e.id = a.employee_id
     LEFT JOIN branches b ON b.id = a.branch_id
     WHERE a.check_out IS NULL
+      AND COALESCE(a.status, '') NOT IN ('ABSENT', 'LEAVE_APPROVED', 'LEAVE_UNAPPROVED')
       AND COALESCE((a.metadata->>'exclude_from_auto_checkout')::boolean, false) = false
   LOOP
     v_staff_names := array_append(v_staff_names, v_rec.employee_name);

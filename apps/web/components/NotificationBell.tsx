@@ -45,8 +45,9 @@ export function NotificationBell() {
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  // Fetch all pending notifications and unclosed punches
+  // Fetch all pending notifications and unclosed punches (SUPER_ADMIN only)
   const fetchAllNotifications = useCallback(async () => {
+    if (role !== "SUPER_ADMIN") return;
     try {
       setLoading(true);
 
@@ -128,9 +129,11 @@ export function NotificationBell() {
     } finally {
       setLoading(false);
     }
-  }, [selectedBranch?.id]);
+  }, [selectedBranch?.id, role]);
 
   useEffect(() => {
+    if (role !== "SUPER_ADMIN") return;
+
     fetchAllNotifications();
 
     // Supabase Real-time listener
@@ -150,7 +153,7 @@ export function NotificationBell() {
       supabaseBrowser.removeChannel(channel);
       clearInterval(interval);
     };
-  }, [fetchAllNotifications]);
+  }, [fetchAllNotifications, role]);
 
   // Handle ESC key
   useEffect(() => {
@@ -321,6 +324,10 @@ export function NotificationBell() {
       return `${start} – ${end}`;
     }
   };
+
+  if (role !== "SUPER_ADMIN") {
+    return null;
+  }
 
   const totalUnreadCount = unclosedList.length + leaveNotifications.length;
 

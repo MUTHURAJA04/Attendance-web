@@ -168,7 +168,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             {/* Context Switcher Button */}
             {!isLoading && (
               <button
-                className="button button-secondary text-xs h-8"
+                className="button button-secondary text-xs h-8 flex items-center gap-1.5"
                 onClick={() => {
                   if (canSwitchWorkspace) {
                     setIsBranchModalOpen(true);
@@ -180,14 +180,21 @@ export function AppShell({ children }: { children: ReactNode }) {
                     : "Locked to your assigned branch"
                 }
               >
-                🏢 {selectedBranch ? selectedBranch.name : "Set Working Branch"}
-                {canSwitchWorkspace && <span className="text-[0.65rem] text-muted-foreground ml-1">▼</span>}
+                <span>🏢</span>
+                <span className="font-medium">
+                  {selectedBranch
+                    ? `${selectedBrand?.name ? `${selectedBrand.name} • ` : ""}${selectedBranch.name}`
+                    : selectedBrand
+                    ? `${selectedBrand.name} (Select Branch)`
+                    : "Set Working Branch"}
+                </span>
+                {canSwitchWorkspace && <span className="text-[0.65rem] text-muted-foreground ml-0.5">▼</span>}
               </button>
             )}
           </div>
 
           <div className="flex items-center gap-3 relative">
-            <NotificationBell />
+            {isSuperAdmin && <NotificationBell />}
 
             {/* Profile Avatar Button */}
             <div
@@ -334,8 +341,8 @@ export function AppShell({ children }: { children: ReactNode }) {
                 </div>
               )}
 
-              {/* Brand (Super Admin only can switch) */}
-              {isSuperAdmin && (
+              {/* Brand (Super Admin or Brand Admin with multiple brands) */}
+              {(isSuperAdmin || (isBrandAdmin && selectableBrands.length > 1)) && (
                 <div className="form-group">
                   <label className="label text-xs">Brand</label>
                   <select
@@ -345,7 +352,6 @@ export function AppShell({ children }: { children: ReactNode }) {
                       const brand = brands.find((b) => b.id === e.target.value);
                       setSelectedBrand(brand || null);
                     }}
-                    disabled={!selectedOrg}
                   >
                     <option value="" disabled>Select Brand</option>
                     {selectableBrands.map((b) => (
@@ -365,12 +371,17 @@ export function AppShell({ children }: { children: ReactNode }) {
                     const branch = branches.find((b) => b.id === e.target.value);
                     setSelectedBranch(branch || null);
                   }}
-                  disabled={isSuperAdmin && !selectedBrand}
                 >
                   <option value="" disabled>Select Branch</option>
-                  {selectableBranches.map((b) => (
-                    <option key={b.id} value={b.id}>{b.name}</option>
-                  ))}
+                  {selectableBranches.length === 0 ? (
+                    <option value="" disabled>No branches available for this brand</option>
+                  ) : (
+                    selectableBranches.map((b) => (
+                      <option key={b.id} value={b.id}>
+                        {b.name}{b.city ? ` (${b.city})` : ""}
+                      </option>
+                    ))
+                  )}
                 </select>
               </div>
             </div>

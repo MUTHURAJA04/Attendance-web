@@ -128,6 +128,16 @@ function formatAction(actionRaw: string): { title: string; category: string; bad
   if (act === "holiday_created") {
     return { title: "Holiday added to calendar", category: "SETTINGS", badgeColor: "pill-success", icon: "📅" };
   }
+  if (act === "holiday_updated") {
+    return { title: "Holiday details updated", category: "SETTINGS", badgeColor: "pill-neutral", icon: "✏️" };
+  }
+  if (act === "holiday_deleted") {
+    return { title: "Holiday removed from calendar", category: "SETTINGS", badgeColor: "pill-destructive", icon: "🗑️" };
+  }
+
+  if (act === "audit_logs_cleared") {
+    return { title: "Audit logs cleared", category: "SETTINGS", badgeColor: "pill-destructive", icon: "🧹" };
+  }
 
   // Clean fallback for any generic snake_case / uppercase strings
   const formatted = act
@@ -243,232 +253,51 @@ export default function AuditLogsPage() {
     return map;
   }, [branches]);
 
-  // Fetch comprehensive audit log items
+  // Fetch clean audit log items from backend API (audit_logs table)
   const fetchAuditLogs = useCallback(async () => {
     try {
       setLoading(true);
 
-      // 1. Primary Query on audit_logs table
-      let auditQuery = supabaseBrowser
-        .from("audit_logs")
-        .select("*")
-        .order("performed_at", { ascending: false })
-        .limit(300);
+      const res = await fetch(`/api/admin/logs?t=${Date.now()}`);
+      const data = await res.json();
+      const auditData: any[] = data.success && Array.isArray(data.logs) ? data.logs : [];
 
-      if (selectedBranch?.id) {
-        auditQuery = auditQuery.or(`branch_id.eq.${selectedBranch.id},branch_id.is.null`);
-      }
-
-      const [auditRes, attRes, leaveRes, loanRes, empRes, rulesRes, periodRes] = await Promise.all([
-        auditQuery,
-        supabaseBrowser
-          .from("attendance_logs")
-          .select("id, employee_id, status, check_in, check_out, branch_id, employees(full_name, role)")
-          .order("check_in", { ascending: false })
-          .limit(40),
-        supabaseBrowser
-          .from("leave_requests")
-          .select("id, employee_id, type, status, start_date, end_date, reason, created_at, employees(full_name, branch_id)")
-          .order("created_at", { ascending: false })
-          .limit(25),
-        supabaseBrowser
-          .from("loans")
-          .select("id, employee_id, type, amount, balance_amount, status, created_at, employees(full_name, branch_id)")
-          .order("created_at", { ascending: false })
-          .limit(25),
-        supabaseBrowser
-          .from("employees")
-          .select("id, full_name, role, status, employee_code, date_of_joining, created_at, branch_id")
-          .order("created_at", { ascending: false })
-          .limit(25),
-        supabaseBrowser
-          .from("branch_rules")
-          .select("id, branch_id, rule_type, title, threshold_minutes, deduction_percentage, is_active, created_at")
-          .order("created_at", { ascending: false })
-          .limit(20),
-        supabaseBrowser
-          .from("payroll_periods")
-          .select("id, month, year, status, locked_at, created_at")
-          .order("created_at", { ascending: false })
-          .limit(10),
-      ]);
-
-      const directLogs: AuditLogItem[] = (auditRes.data || []).map((item) => {
-        let parsedDetails = item.details;
-        if (typeof item.details === "string") {
-          try {
-            parsedDetails = JSON.parse(item.details);
-          } catch {
-            // Keep string
+      const directLogs: AuditLogItem[] = auditData
+        .map((item) => {
+          let parsedDetails = item.details;
+          if (typeof item.details === "string") {
+            try {
+              parsedDetails = JSON.parse(item.details);
+            } catch {
+              // Keep string
+            }
           }
-        }
-        return {
-          ...item,
-          details: parsedDetails,
-          branch_name: item.branch_id ? branchMap[item.branch_id] || "Assigned Branch" : "System / Global",
-        };
-      });
 
-      // 2. Synthesize events from primary tables so that logs are comprehensive across all modules
-      const synthesized: AuditLogItem[] = [];
+          const actorEmail = item.actor_email || (parsedDetails && typeof parsedDetails === "object" ? parsedDetails._actor_email : null);
+          const actorRole = item.actor_role || (parsedDetails && typeof parsedDetails === "object" ? parsedDetails._actor_role : null);
+          const branchId = item.branch_id || (parsedDetails && typeof parsedDetails === "object" ? parsedDetails._branch_id : null);
 
-      // Attendance punches
-      if (attRes.data) {
-        attRes.data.forEach((a: any) => {
-          if (a.check_in) {
-            synthesized.push({
-              id: `att-in-${a.id}`,
-              action: "attendance_punch_in",
-              entity_type: "attendance_logs",
-              entity_id: a.id,
-              actor_email: a.employees?.full_name ? `${a.employees.full_name} (Self)` : "Biometric Device",
-              actor_role: "EMPLOYEE",
-              branch_id: a.branch_id,
-              branch_name: a.branch_id ? branchMap[a.branch_id] || "Branch" : "Main",
-              performed_at: a.check_in,
-              details: {
-                staff: a.employees?.full_name || "Employee",
-                role: a.employees?.role || "Staff",
-                status: a.status || "PRESENT",
-                time: new Date(a.check_in).toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit" }),
-              },
-            });
-          }
+          return {
+            id: item.id,
+            action: item.action,
+            entity_type: item.entity_type,
+            entity_id: item.entity_id,
+            details: parsedDetails,
+            actor_email: actorEmail || "System Admin",
+            actor_role: actorRole || "SUPER_ADMIN",
+            branch_id: branchId,
+            branch_name: branchId ? branchMap[branchId] || "Assigned Branch" : "System / Global",
+            performed_at: item.performed_at || item.created_at || new Date().toISOString(),
+          };
+        })
+        .filter((log) => {
+          if (!selectedBranch?.id) return true;
+          return !log.branch_id || log.branch_id === selectedBranch.id;
         });
-      }
 
-      // Leave requests
-      if (leaveRes.data) {
-        leaveRes.data.forEach((l: any) => {
-          synthesized.push({
-            id: `leave-${l.id}`,
-            action: l.status === "APPROVED" ? "leave_approved" : l.status === "REJECTED" ? "leave_rejected" : "leave_requested",
-            entity_type: "leave_requests",
-            entity_id: l.id,
-            actor_email: l.status === "APPROVED" ? "Branch Manager" : l.employees?.full_name || "Staff",
-            actor_role: l.status === "APPROVED" ? "BRANCH_MANAGER" : "EMPLOYEE",
-            branch_id: l.employees?.branch_id,
-            branch_name: l.employees?.branch_id ? branchMap[l.employees.branch_id] || "Branch" : "Main",
-            performed_at: l.created_at,
-            details: {
-              staff: l.employees?.full_name || "Employee",
-              leave_type: l.type,
-              duration: `${l.start_date} to ${l.end_date}`,
-              status: l.status,
-              reason: l.reason || "Personal",
-            },
-          });
-        });
-      }
+      directLogs.sort((a, b) => new Date(b.performed_at).getTime() - new Date(a.performed_at).getTime());
 
-      // Loans
-      if (loanRes.data) {
-        loanRes.data.forEach((lo: any) => {
-          synthesized.push({
-            id: `loan-${lo.id}`,
-            action: lo.status === "WRITTEN_OFF" ? "loan_writeoff" : "loan_created",
-            entity_type: "loans",
-            entity_id: lo.id,
-            actor_email: "Payroll Manager",
-            actor_role: "PAYROLL_MANAGER",
-            branch_id: lo.employees?.branch_id,
-            branch_name: lo.employees?.branch_id ? branchMap[lo.employees.branch_id] || "Branch" : "Main",
-            performed_at: lo.created_at,
-            details: {
-              staff: lo.employees?.full_name || "Employee",
-              type: lo.type,
-              principal: Number(lo.amount || 0),
-              balance: Number(lo.balance_amount || 0),
-              status: lo.status,
-            },
-          });
-        });
-      }
-
-      // Employees
-      if (empRes.data) {
-        empRes.data.forEach((e: any) => {
-          synthesized.push({
-            id: `emp-${e.id}`,
-            action: e.status === "LEFT" ? "employee_marked_left" : e.status === "INACTIVE" ? "employee_disabled" : "employee_created",
-            entity_type: "employees",
-            entity_id: e.id,
-            actor_email: "Branch Manager",
-            actor_role: "BRANCH_MANAGER",
-            branch_id: e.branch_id,
-            branch_name: e.branch_id ? branchMap[e.branch_id] || "Branch" : "Main",
-            performed_at: e.created_at || e.date_of_joining,
-            details: {
-              staff: e.full_name,
-              role: e.role,
-              code: e.employee_code || "—",
-              status: e.status,
-            },
-          });
-        });
-      }
-
-      // Branch Rules
-      if (rulesRes.data) {
-        rulesRes.data.forEach((r: any) => {
-          synthesized.push({
-            id: `rule-${r.id}`,
-            action: "branch_rule_created",
-            entity_type: "branch_rules",
-            entity_id: r.id,
-            actor_email: "Branch Admin",
-            actor_role: "SUPER_ADMIN",
-            branch_id: r.branch_id,
-            branch_name: r.branch_id ? branchMap[r.branch_id] || "Branch" : "All Branches",
-            performed_at: r.created_at,
-            details: {
-              rule_title: r.title,
-              type: r.rule_type,
-              threshold: `${r.threshold_minutes} mins`,
-              deduction: `${r.deduction_percentage}%`,
-              active: r.is_active ? "Active" : "Disabled",
-            },
-          });
-        });
-      }
-
-      // Payroll Periods
-      if (periodRes.data) {
-        periodRes.data.forEach((p: any) => {
-          synthesized.push({
-            id: `payroll-${p.id}`,
-            action: p.status === "LOCKED" ? "payroll_period_locked" : "payroll_calculated",
-            entity_type: "payroll_periods",
-            entity_id: p.id,
-            actor_email: "Payroll Manager",
-            actor_role: "PAYROLL_MANAGER",
-            branch_id: null,
-            branch_name: "All Branches",
-            performed_at: p.locked_at || p.created_at,
-            details: {
-              period: `${p.month}/${p.year}`,
-              status: p.status,
-              locked: p.status === "LOCKED" ? "Locked & Finalized" : "Open",
-            },
-          });
-        });
-      }
-
-      // Merge & deduplicate by ID or identical action+entity
-      const seen = new Set<string>();
-      const merged: AuditLogItem[] = [];
-
-      for (const log of [...directLogs, ...synthesized]) {
-        const uniqueKey = log.id || `${log.action}-${log.entity_id}-${log.performed_at}`;
-        if (!seen.has(uniqueKey)) {
-          seen.add(uniqueKey);
-          merged.push(log);
-        }
-      }
-
-      merged.sort((a, b) => new Date(b.performed_at).getTime() - new Date(a.performed_at).getTime());
-
-      setLogs(merged);
+      setLogs(directLogs);
     } catch (err) {
       console.error("Error fetching audit logs:", err);
     } finally {
@@ -605,6 +434,42 @@ export default function AuditLogsPage() {
     );
   };
 
+  // Clear all audit logs (Super Admin only)
+  const handleClearLogs = async () => {
+    if (!window.confirm("Are you sure you want to clear all audit log records? This action cannot be undone.")) {
+      return;
+    }
+    try {
+      setLoading(true);
+      const res = await fetch(`/api/admin/logs${selectedBranch?.id ? `?branch_id=${selectedBranch.id}` : ""}`, {
+        method: "DELETE",
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to clear logs");
+
+      setLogs([]);
+      await fetchAuditLogs();
+    } catch (err: any) {
+      alert(err.message || "Could not clear logs");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const isAuthorized = !userRole || ["SUPER_ADMIN", "BRAND_ADMIN", "PAYROLL_MANAGER", "BRANCH_ADMIN", "BRANCH_MANAGER", "MANAGER"].includes(userRole);
+
+  if (!isAuthorized) {
+    return (
+      <div className="card p-8 text-center max-w-md mx-auto mt-12 space-y-3">
+        <span className="text-3xl">🔒</span>
+        <h2 className="text-lg font-bold text-foreground">Access Restricted</h2>
+        <p className="text-xs text-muted-foreground">
+          System audit logs are reserved for administrative accounts.
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className="max-w-7xl mx-auto pb-16 space-y-6">
       {/* Header */}
@@ -623,6 +488,18 @@ export default function AuditLogsPage() {
         </div>
 
         <div className="flex items-center gap-3 w-full sm:w-auto">
+          {userRole === "SUPER_ADMIN" && (
+            <button
+              type="button"
+              className="button button-secondary text-xs flex items-center gap-1.5 text-destructive hover:bg-destructive/10 bg-background"
+              onClick={handleClearLogs}
+              disabled={loading}
+              title="Clear all audit log records"
+            >
+              🗑️ Clear All Logs
+            </button>
+          )}
+
           <button
             type="button"
             className="button button-secondary text-xs flex items-center gap-1.5"

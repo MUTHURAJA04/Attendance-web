@@ -68,6 +68,7 @@ function NewEmployeeForm() {
   const [enableOT, setEnableOT] = useState<boolean>(false);
   const [enablePF, setEnablePF] = useState<boolean>(false);
   const [enableESI, setEnableESI] = useState<boolean>(false);
+  const [enablePT, setEnablePT] = useState<boolean>(true);
   const [sliderDaysWorked, setSliderDaysWorked] = useState<number>(26);
   const [ctcInput, setCtcInput] = useState("");
 
@@ -244,10 +245,12 @@ function NewEmployeeForm() {
     }
 
     let ptDeduction = 0;
-    if (actualGross > 15000) {
-      ptDeduction = 200;
-    } else if (actualGross > 10000) {
-      ptDeduction = 150;
+    if (enablePT) {
+      if (actualGross > 15000) {
+        ptDeduction = 200;
+      } else if (actualGross > 10000) {
+        ptDeduction = 150;
+      }
     }
 
     const totalDeductions = employeePF + employeeESI + ptDeduction;
@@ -272,7 +275,7 @@ function NewEmployeeForm() {
       proratedBasic,
       proratedDA,
     };
-  }, [salaryData, paidOffDays, enablePF, enableESI, sliderDaysWorked]);
+  }, [salaryData, paidOffDays, enablePF, enableESI, enablePT, sliderDaysWorked]);
 
   const field = (key: keyof typeof formData, value: string | any[]) => {
     setFormData({ ...formData, [key]: value });
@@ -397,6 +400,7 @@ function NewEmployeeForm() {
       enable_ot: enableOT,
       enable_pf: enablePF,
       enable_esi: enableESI,
+      enable_pt: enablePT,
     };
 
     const { data: empData, error: empError } = await supabaseBrowser.from("employees").insert([dbPayload]).select("id").single();
@@ -408,14 +412,27 @@ function NewEmployeeForm() {
     }
 
     if (empData?.id) {
-      await supabaseBrowser.from("salary_structures").insert([{
+      const salaryPayload = {
         employee_id: empData.id,
         basic_pay: Number(salaryData.basic_pay) || 0,
         hra: Number(salaryData.hra) || 0,
         allowances: Number(salaryData.allowances) + Number(salaryData.da || 0),
         ot_rate: Number(salaryData.ot_rate) || 0,
         effective_from: formData.date_of_joining,
-      }]);
+      };
+
+      await supabaseBrowser.from("salary_structures").insert([salaryPayload]);
+
+      console.group(`=== 🚀 [ONBOARD] NEW EMPLOYEE ONBOARDED: ${dbPayload.full_name} ===`);
+      console.log("[ONBOARD] Employee Profile Details:", dbPayload);
+      console.table([
+        { Component: "Basic Pay", Amount: salaryPayload.basic_pay },
+        { Component: "HRA", Amount: salaryPayload.hra },
+        { Component: "DA & Allowances", Amount: salaryPayload.allowances },
+        { Component: "Total Gross CTC", Amount: salaryPayload.basic_pay + salaryPayload.hra + salaryPayload.allowances },
+        { Component: "Overtime Rate (/hr)", Amount: salaryPayload.ot_rate },
+      ]);
+      console.groupEnd();
     }
 
     router.push("/employees");
@@ -778,6 +795,10 @@ function NewEmployeeForm() {
                 <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
                   <input type="checkbox" checked={enableESI} onChange={(e) => setEnableESI(e.target.checked)} className="rounded border-border text-primary focus:ring-primary h-4 w-4" />
                   Enable ESI (Healthcare)
+                </label>
+                <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
+                  <input type="checkbox" checked={enablePT} onChange={(e) => setEnablePT(e.target.checked)} className="rounded border-border text-primary focus:ring-primary h-4 w-4" />
+                  Enable PT (Professional Tax)
                 </label>
               </div>
               

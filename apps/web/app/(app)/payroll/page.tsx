@@ -106,9 +106,35 @@ export default function PayrollPage() {
         loadPayrollData();
     };
 
+    function printBrowserTraces(traces: any[]) {
+        if (!traces || !Array.isArray(traces)) return;
+        traces.forEach((trace: any) => {
+            console.group(`=== 📅 PAYROLL EXECUTION: ${trace.empName} (${trace.empId}) ===`);
+            console.log(`📋 [ATTENDANCE SUMMARY TABLE] Days Present, Half Days, Absent & Leave Breakdown for ${trace.empName}:`);
+            console.table(trace.attendanceTable || trace.inputsTable);
+            console.log(`👤 [ONBOARD] Employee Profile & Setup:`);
+            console.table(trace.onboardTable);
+            console.log(`💵 [ONBOARD] Salary Contract Structure:`);
+            console.table(trace.salaryTable);
+            console.log(`📈 [CALC:GROSS] Gross Pay & Earnings Breakdown:`);
+            console.table(trace.grossTable);
+            console.log(`📉 [CALC:DEDUCTIONS] Statutory Deductions & Loan Recoveries:`);
+            console.table(trace.deductionsTable);
+            console.log(`💰 [CALC:NET] Take-Home Salary Summary:`);
+            console.table(trace.netTable);
+            console.log(`🏦 [PAYOUT] Final Payslip Output Created:`, trace.payout);
+            console.groupEnd();
+        });
+    }
+
     const computePayroll = async () => {
         if (!period) return;
         setIsProcessing(true);
+
+        console.group("=== ⚙️ [PAYROLL COMPUTATION TRIGGERED] ===");
+        console.log("[INPUTS] Selected Pay Period:", { month: selectedMonth, year: selectedYear, periodId: period.id });
+        console.log("[INPUTS] Branch Scope:", globalBranch ? `${globalBranch.name} (${globalBranch.id})` : "ALL BRANCHES");
+        console.groupEnd();
 
         try {
             const { data: sessionData } = await supabaseBrowser.auth.getSession();
@@ -127,9 +153,13 @@ export default function PayrollPage() {
             });
 
             const data = await res.json();
+            if (data?.traces) {
+                printBrowserTraces(data.traces);
+            }
+
             if (!res.ok || data.error) {
                 // Fallback to Edge function if API route encounters error
-                const edgeResult = await callEdgeFunction<{ summary: { employeeCount: number; totalGross: number; totalDeductions: number; totalNet: number } }>(
+                const edgeResult = await callEdgeFunction<{ summary: { employeeCount: number; totalGross: number; totalDeductions: number; totalNet: number }; traces?: any[] }>(
                     supabaseBrowser,
                     "calculate-payroll",
                     {
@@ -140,6 +170,9 @@ export default function PayrollPage() {
                         },
                     }
                 );
+                if (edgeResult.data?.traces) {
+                    printBrowserTraces(edgeResult.data.traces);
+                }
                 if (edgeResult.error) {
                     alert("Payroll computation failed: " + (data.error || edgeResult.error));
                 }
@@ -147,7 +180,7 @@ export default function PayrollPage() {
         } catch (err: any) {
             console.error("Payroll calculation error:", err);
             // Fallback to Edge Function
-            const edgeResult = await callEdgeFunction<{ summary: { employeeCount: number; totalGross: number; totalDeductions: number; totalNet: number } }>(
+            const edgeResult = await callEdgeFunction<{ summary: { employeeCount: number; totalGross: number; totalDeductions: number; totalNet: number }; traces?: any[] }>(
                 supabaseBrowser,
                 "calculate-payroll",
                 {
@@ -158,6 +191,9 @@ export default function PayrollPage() {
                     },
                 }
             );
+            if (edgeResult.data?.traces) {
+                printBrowserTraces(edgeResult.data.traces);
+            }
             if (edgeResult.error) {
                 alert("Payroll computation error: " + (err?.message || edgeResult.error));
             }

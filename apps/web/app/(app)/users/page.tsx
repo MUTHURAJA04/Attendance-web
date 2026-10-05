@@ -3,6 +3,7 @@
 import { useEffect, useState, useMemo } from "react";
 import { useAuth } from "../../../components/AuthGate";
 import { useTenant } from "../../../components/TenantContext";
+import { MultiSelectDropdown } from "../../../components/MultiSelectDropdown";
 import { type Role } from "@attendance/shared";
 
 interface UserProfileItem {
@@ -25,6 +26,11 @@ interface UserProfileItem {
 export default function UsersManagementPage() {
   const { userId: currentUserId, role: callerRole, loading: authLoading } = useAuth();
   const { brands, branches, isLoading: tenantLoading } = useTenant();
+  const [apiBrands, setApiBrands] = useState<Array<{ id: string; name: string }>>([]);
+  const [apiBranches, setApiBranches] = useState<Array<{ id: string; name: string; brand_id: string; city?: string }>>([]);
+
+  const allBrands = useMemo(() => (apiBrands.length > 0 ? apiBrands : brands), [apiBrands, brands]);
+  const allBranches = useMemo(() => (apiBranches.length > 0 ? apiBranches : branches), [apiBranches, branches]);
 
   const [users, setUsers] = useState<UserProfileItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -59,6 +65,12 @@ export default function UsersManagementPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to fetch users");
       setUsers(data.users || []);
+      if (Array.isArray(data.brands) && data.brands.length > 0) {
+        setApiBrands(data.brands);
+      }
+      if (Array.isArray(data.branches) && data.branches.length > 0) {
+        setApiBranches(data.branches);
+      }
     } catch (err: any) {
       setFeedback({ type: "error", msg: err.message || "Could not load users" });
     } finally {
@@ -72,20 +84,18 @@ export default function UsersManagementPage() {
     }
   }, [isSuperAdmin]);
 
-  // Open Create Modal
+  // Open Create Modal - starts clean with NO auto-selected brands/branches
   const handleOpenCreate = () => {
     setEditingUserId(null);
     setModalError(null);
-    const initialBrandId = brands[0]?.id ?? "";
-    const brandBranches = branches.filter((br) => br.brand_id === initialBrandId);
 
     setFormData({
       full_name: "",
       email: "",
       password: "",
       role: "BRANCH_ADMIN",
-      brand_ids: initialBrandId ? [initialBrandId] : [],
-      branch_ids: brandBranches[0]?.id ? [brandBranches[0].id] : [],
+      brand_ids: [],
+      branch_ids: [],
       is_active: true,
     });
     setFeedback(null);
@@ -105,12 +115,18 @@ export default function UsersManagementPage() {
       ? user.branch_ids
       : user.branch_id ? [user.branch_id] : [];
 
+    const branchParentBrandIds = initialBranchIds
+      .map((id) => allBranches.find((b) => b.id === id)?.brand_id)
+      .filter(Boolean) as string[];
+
+    const mergedBrandIds = Array.from(new Set([...initialBrandIds, ...branchParentBrandIds]));
+
     setFormData({
       full_name: user.full_name,
       email: user.email,
       password: "",
       role: (user.role as Role) || "BRANCH_ADMIN",
-      brand_ids: initialBrandIds,
+      brand_ids: mergedBrandIds,
       branch_ids: initialBranchIds,
       is_active: user.is_active,
     });
@@ -128,7 +144,7 @@ export default function UsersManagementPage() {
 
       // Automatically unselect any branch whose brand was unselected
       const validBranchIds = prev.branch_ids.filter((branchId) => {
-        const branch = branches.find((b) => b.id === branchId);
+        const branch = allBranches.find((b) => b.id === branchId);
         return branch && updatedBrandIds.includes(branch.brand_id);
       });
 
@@ -203,8 +219,8 @@ export default function UsersManagementPage() {
         if (!res.ok) throw new Error(data.error || "Failed to update user");
 
         // Optimistically update local users state immediately
-        const brandNamesList = payload.brand_ids.map((bid: string) => brands.find((b) => b.id === bid)?.name).filter(Boolean) as string[];
-        const branchNamesList = payload.branch_ids.map((brid: string) => branches.find((b) => b.id === brid)?.name).filter(Boolean) as string[];
+        const brandNamesList = payload.brand_ids.map((bid: string) => allBrands.find((b) => b.id === bid)?.name).filter(Boolean) as string[];
+        const branchNamesList = payload.branch_ids.map((brid: string) => allBranches.find((b) => b.id === brid)?.name).filter(Boolean) as string[];
 
         setUsers((prev) =>
           prev.map((u) => {
@@ -305,10 +321,32 @@ export default function UsersManagementPage() {
     }
   };
 
-  // Available child branches under selected brands
-  const availableChildBranches = useMemo(() => {
-    return branches.filter((br) => formData.brand_ids.includes(br.brand_id));
-  }, [branches, formData.brand_ids]);
+  // Available child branches: show all branches if no brand filter, or filter by selected brands
+  const brandOptions = useMemo(() => {
+    return allBrands.map((b) => ({
+      id: b.id,
+      label: b.name,
+    }));
+  }, [allBrands]);
+
+  // Only branches belonging to selected brand(s)
+  const branchOptions = useMemo(() => {
+    if (formData.brand_ids.length === 0) return [];
+
+    const filtered = allBranches.filter((b) => formData.brand_ids.includes(b.brand_id));
+    const sorted = [...filtered].sort((a, b) => a.name.localeCompare(b.name));
+
+    return sorted.map((br) => {
+      const parentBrand = allBrands.find((b) => b.id === br.brand_id);
+      const details = [parentBrand?.name, br.city].filter(Boolean).join(" • ");
+
+      return {
+        id: br.id,
+        label: br.name,
+        subLabel: details || undefined,
+      };
+    });
+  }, [allBranches, allBrands, formData.brand_ids]);
 
   // Counts by role
   const counts = useMemo(() => {
@@ -374,25 +412,34 @@ export default function UsersManagementPage() {
         </button>
       </div>
 
-      {/* Feedback Banner */}
-      {feedback && (
-        <div
-          className={`p-3 rounded-lg border text-xs font-medium flex items-center justify-between mb-5 ${
-            feedback.type === "success"
-              ? "bg-emerald-50 text-emerald-900 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-200 dark:border-emerald-800"
-              : "bg-red-50 text-red-900 border-red-200 dark:bg-red-950/40 dark:text-red-200 dark:border-red-800"
-          }`}
-        >
-          <span>{feedback.msg}</span>
-          <button
-            type="button"
-            onClick={() => setFeedback(null)}
-            className="text-xs underline opacity-80 hover:opacity-100 cursor-pointer"
-          >
-            Dismiss
-          </button>
-        </div>
-      )}
+{/* Feedback Banner */}
+{feedback && (
+  <div
+    role="alert"
+    className={`p-3 rounded-[var(--radius)] border text-xs font-medium flex items-center justify-between gap-3 mb-5 transition-all shadow-xs backdrop-blur-xs ${
+      feedback.type === "success"
+        ? "bg-accent-2/10 text-accent-2 border-accent-2/25 dark:bg-accent-2/15 dark:border-accent-2/30"
+        : "bg-destructive/10 text-destructive border-destructive/25 dark:bg-destructive/15 dark:border-destructive/30"
+    }`}
+  >
+    <div className="flex items-center gap-2">
+      <span
+        className={`inline-block h-1.5 w-1.5 rounded-full ${
+          feedback.type === "success" ? "bg-accent-2" : "bg-destructive"
+        }`}
+      />
+      <span>{feedback.msg}</span>
+    </div>
+
+    <button
+      type="button"
+      onClick={() => setFeedback(null)}
+      className="text-xs font-semibold opacity-70 hover:opacity-100 transition-opacity cursor-pointer shrink-0"
+    >
+      Dismiss
+    </button>
+  </div>
+)}
 
       {/* Role Filter Tabs (Styled like Employees status tabs) */}
       <div className="flex flex-wrap gap-1 p-1 bg-muted rounded-lg mb-6 w-fit">
@@ -582,8 +629,8 @@ export default function UsersManagementPage() {
 
       {/* ── Create / Edit Modal (Matching Project Modal Style) ── */}
       {isModalOpen && (
-        <div className="fixed inset-0 bg-black/50 grid place-items-center z-50 overflow-y-auto py-10">
-          <div className="card w-full max-w-[480px] my-auto">
+        <div className="fixed inset-0 bg-black/50 flex items-start sm:items-center justify-center z-50 overflow-y-auto p-4 sm:p-6">
+          <div className="card w-full max-w-xl sm:max-w-2xl my-auto overflow-visible relative shadow-xl">
             {/* Modal Header */}
             <div className="flex justify-between items-center mb-4 pb-3 border-b border-border">
               <h2 className="text-lg font-bold text-foreground">
@@ -667,119 +714,72 @@ export default function UsersManagementPage() {
 
               {/* Brand Assignment (For BRAND_ADMIN) */}
               {formData.role === "BRAND_ADMIN" && (
-                <div className="form-group space-y-1.5">
-                  <div className="flex justify-between items-center">
-                    <label className="label">Brand Assignment</label>
-                    <span className="text-xs text-muted-foreground">
-                      {formData.brand_ids.length} selected
-                    </span>
-                  </div>
-                  <div className="grid grid-cols-2 gap-1.5 p-2 rounded-lg border border-border bg-muted/30 max-h-36 overflow-y-auto">
-                    {brands.length === 0 ? (
-                      <p className="text-xs text-muted-foreground col-span-2 py-2 text-center">No brands available</p>
-                    ) : (
-                      brands.map((b) => {
-                        const isChecked = formData.brand_ids.includes(b.id);
-                        return (
-                          <button
-                            key={b.id}
-                            type="button"
-                            onClick={() => handleToggleBrand(b.id)}
-                            className={`px-3 py-1.5 rounded-md text-xs text-left transition-all cursor-pointer flex items-center justify-between border ${
-                              isChecked
-                                ? "bg-primary text-primary-foreground border-primary font-medium"
-                                : "bg-card border-border/80 text-muted-foreground hover:text-foreground hover:border-border"
-                            }`}
-                          >
-                            <span className="truncate">{b.name}</span>
-                            <span className="text-[0.7rem] ml-1">{isChecked ? "✓" : "+"}</span>
-                          </button>
-                        );
-                      })
-                    )}
-                  </div>
-                </div>
+                <MultiSelectDropdown
+                  label="Brand Assignment *"
+                  placeholder="Select brands..."
+                  searchPlaceholder="Search brand..."
+                  options={brandOptions}
+                  selectedIds={formData.brand_ids}
+                  onChange={(ids) => {
+                    setFormData((prev) => ({
+                      ...prev,
+                      brand_ids: ids,
+                      branch_ids: [],
+                    }));
+                  }}
+                  emptyMessage="No brands available"
+                />
               )}
 
               {/* Brand & Branch Assignment (For BRANCH_ADMIN, MANAGER, STAFF) */}
               {formData.role !== "SUPER_ADMIN" && formData.role !== "BRAND_ADMIN" && (
                 <>
-                  {/* Select Brand */}
-                  <div className="form-group space-y-1.5">
-                    <div className="flex justify-between items-center">
-                      <label className="label">Brand Assignment</label>
-                      <span className="text-xs text-muted-foreground">
-                        {formData.brand_ids.length} selected
-                      </span>
-                    </div>
-                    <div className="grid grid-cols-2 gap-1.5 p-2 rounded-lg border border-border bg-muted/30 max-h-32 overflow-y-auto">
-                      {brands.length === 0 ? (
-                        <p className="text-xs text-muted-foreground col-span-2 py-2 text-center">No brands available</p>
-                      ) : (
-                        brands.map((b) => {
-                          const isChecked = formData.brand_ids.includes(b.id);
-                          return (
-                            <button
-                              key={b.id}
-                              type="button"
-                              onClick={() => handleToggleBrand(b.id)}
-                              className={`px-3 py-1.5 rounded-md text-xs text-left transition-all cursor-pointer flex items-center justify-between border ${
-                                isChecked
-                                  ? "bg-primary text-primary-foreground border-primary font-medium"
-                                  : "bg-card border-border/80 text-foreground hover:text-foreground hover:border-border"
-                              }`}
-                            >
-                              <span className="truncate">{b.name}</span>
-                              <span className="text-[0.7rem] ml-1">{isChecked ? "✓" : "+"}</span>
-                            </button>
-                          );
-                        })
-                      )}
-                    </div>
-                  </div>
+                  {/* Select Brand(s) */}
+                  <MultiSelectDropdown
+                    label="Brand Assignment *"
+                    placeholder="Select brands..."
+                    searchPlaceholder="Search brand..."
+                    options={brandOptions}
+                    selectedIds={formData.brand_ids}
+                    onChange={(ids) => {
+                      setFormData((prev) => {
+                        const validBranchIds = prev.branch_ids.filter((branchId) => {
+                          const branch = allBranches.find((b) => b.id === branchId);
+                          return branch && ids.includes(branch.brand_id);
+                        });
+                        return {
+                          ...prev,
+                          brand_ids: ids,
+                          branch_ids: validBranchIds,
+                        };
+                      });
+                    }}
+                    emptyMessage="No brands available"
+                  />
 
-                  {/* Select Branch (Minimal flat list of child branches) */}
-                  <div className="form-group space-y-1.5">
-                    <div className="flex justify-between items-center">
-                      <label className="label">Branch Assignment</label>
-                      <span className="text-xs text-muted-foreground">
-                        {formData.branch_ids.length} selected
-                      </span>
-                    </div>
-
-                    <div className="p-2 rounded-lg border border-border bg-muted/30 max-h-44 overflow-y-auto">
-                      {formData.brand_ids.length === 0 ? (
-                        <p className="text-xs text-muted-foreground text-center py-4">
-                          Select a brand above to view branches
-                        </p>
-                      ) : availableChildBranches.length === 0 ? (
-                        <p className="text-xs text-muted-foreground text-center py-4">
-                          No branches available under selected brand(s)
-                        </p>
-                      ) : (
-                        <div className="grid grid-cols-2 gap-1.5">
-                          {availableChildBranches.map((br) => {
-                            const isChecked = formData.branch_ids.includes(br.id);
-                            return (
-                              <button
-                                key={br.id}
-                                type="button"
-                                onClick={() => handleToggleBranch(br.id)}
-                                className={`px-3 py-1.5 rounded-md text-xs text-left transition-all cursor-pointer flex items-center justify-between border ${
-                                  isChecked
-                                    ? "bg-primary text-primary-foreground border-primary font-medium"
-                                    : "bg-card border-border/80 text-foreground hover:text-foreground hover:border-border"
-                                }`}
-                              >
-                                <span className="truncate">{br.name}</span>
-                                <span className="text-[0.7rem] ml-1 shrink-0">{isChecked ? "✓" : "+"}</span>
-                              </button>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </div>
-                  </div>
+                  {/* Select Branch(es) */}
+                  <MultiSelectDropdown
+                    label="Branch Assignment *"
+                    placeholder={
+                      formData.brand_ids.length === 0
+                        ? "Select brand(s) first..."
+                        : "Select branches..."
+                    }
+                    searchPlaceholder="Search branch by name or city..."
+                    options={branchOptions}
+                    selectedIds={formData.branch_ids}
+                    onChange={(ids) => {
+                      setFormData((prev) => ({
+                        ...prev,
+                        branch_ids: ids,
+                      }));
+                    }}
+                    emptyMessage={
+                      formData.brand_ids.length === 0
+                        ? "Please select a brand above to view its branches"
+                        : "No branches found for selected brand(s)"
+                    }
+                  />
                 </>
               )}
 

@@ -95,29 +95,40 @@ export function TenantProvider({ children }: { children: ReactNode }) {
 
             // Restore from localStorage or pick defaults
             const savedBranchId = localStorage.getItem("selectedBranchId");
+            const savedBrandId = localStorage.getItem("selectedBrandId");
 
-            let initialBranch = null;
+            let initialBranch: Branch | null = null;
             if (savedBranchId && availableBranches.some((b) => b.id === savedBranchId)) {
-                initialBranch = availableBranches.find((b) => b.id === savedBranchId) || availableBranches[0] || null;
-            } else if (availableBranches.length > 0) {
-                initialBranch = availableBranches[0];
+                initialBranch = availableBranches.find((b) => b.id === savedBranchId) || null;
+            }
+
+            let initialBrand: Brand | null = null;
+            if (initialBranch) {
+                const targetBrandId = initialBranch.brand_id;
+                initialBrand = availableBrands.find((b) => b.id === targetBrandId) || null;
+            } else if (savedBrandId && availableBrands.some((b) => b.id === savedBrandId)) {
+                initialBrand = availableBrands.find((b) => b.id === savedBrandId) || null;
+                const targetBrandId = initialBrand?.id;
+                initialBranch = availableBranches.find((b) => b.brand_id === targetBrandId) || null;
+            } else if (availableBranches.length > 0 && availableBranches[0]) {
+                const firstBranch = availableBranches[0];
+                initialBranch = firstBranch;
+                initialBrand = availableBrands.find((b) => b.id === firstBranch.brand_id) || null;
+            } else if (availableBrands.length > 0 && availableBrands[0]) {
+                initialBrand = availableBrands[0];
             }
 
             if (initialBranch) {
                 setSelectedBranchState(initialBranch);
                 localStorage.setItem("selectedBranchId", initialBranch.id);
-
-                const parentBrand = (brandData || []).find((b) => b.id === initialBranch.brand_id) || null;
-                setSelectedBrandState(parentBrand);
-
-                if (parentBrand) {
-                    const parentOrg = (allOrgs || []).find((o) => o.id === parentBrand.organization_id) || null;
+            }
+            if (initialBrand) {
+                setSelectedBrandState(initialBrand);
+                localStorage.setItem("selectedBrandId", initialBrand.id);
+                const parentOrg = allOrgs.find((o) => o.id === initialBrand.organization_id) || null;
+                if (parentOrg) {
                     setSelectedOrgState(parentOrg);
                 }
-            } else if (availableBrands.length > 0) {
-                setSelectedBrandState(availableBrands[0]);
-                const parentOrg = (allOrgs || []).find((o) => o.id === availableBrands[0].organization_id) || null;
-                setSelectedOrgState(parentOrg);
             }
         } catch (err) {
             console.error("Failed to fetch tenant hierarchy:", err);
@@ -136,7 +147,15 @@ export function TenantProvider({ children }: { children: ReactNode }) {
             localStorage.setItem("selectedBranchId", branch.id);
 
             const parentBrand = brands.find((b) => b.id === branch.brand_id) || null;
-            handleSetSelectedBrand(parentBrand);
+            if (parentBrand) {
+                setSelectedBrandState(parentBrand);
+                localStorage.setItem("selectedBrandId", parentBrand.id);
+
+                const parentOrg = organizations.find((o) => o.id === parentBrand.organization_id) || null;
+                if (parentOrg) {
+                    setSelectedOrgState(parentOrg);
+                }
+            }
         } else {
             localStorage.removeItem("selectedBranchId");
         }
@@ -145,29 +164,53 @@ export function TenantProvider({ children }: { children: ReactNode }) {
     const handleSetSelectedBrand = (brand: Brand | null) => {
         setSelectedBrandState(brand);
         if (brand) {
+            localStorage.setItem("selectedBrandId", brand.id);
             const parentOrg = organizations.find((o) => o.id === brand.organization_id) || null;
-            setSelectedOrgState(parentOrg);
-
-            // Auto-select first branch of this brand if the current branch doesn't belong to it
-            if (!selectedBranch || selectedBranch.brand_id !== brand.id) {
-                const firstBranchOfBrand = branches.find((b) => b.brand_id === brand.id);
-                if (firstBranchOfBrand) {
-                    handleSetSelectedBranch(firstBranchOfBrand);
-                }
+            if (parentOrg) {
+                setSelectedOrgState(parentOrg);
             }
+
+            // Sync branch: keep current if it belongs to this brand, otherwise pick first branch of brand
+            setSelectedBranchState((prevBranch) => {
+                if (prevBranch && prevBranch.brand_id === brand.id) {
+                    return prevBranch;
+                }
+                const firstBranchOfBrand = branches.find((b) => b.brand_id === brand.id) || null;
+                if (firstBranchOfBrand) {
+                    localStorage.setItem("selectedBranchId", firstBranchOfBrand.id);
+                } else {
+                    localStorage.removeItem("selectedBranchId");
+                }
+                return firstBranchOfBrand;
+            });
+        } else {
+            localStorage.removeItem("selectedBrandId");
         }
     };
 
     const handleSetSelectedOrg = (org: Organization | null) => {
         setSelectedOrgState(org);
         if (org) {
-            // Auto-select first brand of this org if the current brand doesn't belong to it
-            if (!selectedBrand || selectedBrand.organization_id !== org.id) {
-                const firstBrandOfOrg = brands.find((b) => b.organization_id === org.id);
-                if (firstBrandOfOrg) {
-                    handleSetSelectedBrand(firstBrandOfOrg);
+            setSelectedBrandState((prevBrand) => {
+                if (prevBrand && prevBrand.organization_id === org.id) {
+                    return prevBrand;
                 }
-            }
+                const firstBrandOfOrg = brands.find((b) => b.organization_id === org.id) || null;
+                if (firstBrandOfOrg) {
+                    localStorage.setItem("selectedBrandId", firstBrandOfOrg.id);
+                    const firstBranch = branches.find((b) => b.brand_id === firstBrandOfOrg.id) || null;
+                    if (firstBranch) {
+                        localStorage.setItem("selectedBranchId", firstBranch.id);
+                        setSelectedBranchState(firstBranch);
+                    } else {
+                        localStorage.removeItem("selectedBranchId");
+                        setSelectedBranchState(null);
+                    }
+                } else {
+                    localStorage.removeItem("selectedBrandId");
+                }
+                return firstBrandOfOrg;
+            });
         }
     };
 

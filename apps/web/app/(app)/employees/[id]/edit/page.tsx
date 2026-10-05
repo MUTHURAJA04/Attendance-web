@@ -95,6 +95,9 @@ export default function EditEmployeePage() {
                 if (!empData.skills || !Array.isArray(empData.skills)) {
                     empData.skills = [];
                 }
+                if (empData.enable_pt === undefined || empData.enable_pt === null) {
+                    empData.enable_pt = true;
+                }
                 setFormData(empData);
             }
             if (salaryRes.data) {
@@ -516,6 +519,28 @@ export default function EditEmployeePage() {
                             <div className="form-group flex-1">
                                 <label className="label">ESI Number</label>
                                 <input className="input" value={formData.esi_number} onChange={e => setFormData({ ...formData, esi_number: e.target.value })} />
+                            </div>
+                        </div>
+
+                        <div className="border border-border rounded-lg p-4 bg-muted/20 flex flex-col gap-3 mt-2">
+                            <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Statutory & Overtime Options</span>
+                            <div className="flex flex-wrap gap-6">
+                                <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
+                                    <input type="checkbox" checked={formData.enable_ot ?? true} onChange={(e) => setFormData({ ...formData, enable_ot: e.target.checked })} className="rounded border-border text-primary focus:ring-primary h-4 w-4" />
+                                    Enable OT
+                                </label>
+                                <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
+                                    <input type="checkbox" checked={formData.enable_pf ?? true} onChange={(e) => setFormData({ ...formData, enable_pf: e.target.checked })} className="rounded border-border text-primary focus:ring-primary h-4 w-4" />
+                                    Enable PF (Provident Fund)
+                                </label>
+                                <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
+                                    <input type="checkbox" checked={formData.enable_esi ?? true} onChange={(e) => setFormData({ ...formData, enable_esi: e.target.checked })} className="rounded border-border text-primary focus:ring-primary h-4 w-4" />
+                                    Enable ESI (Healthcare)
+                                </label>
+                                <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
+                                    <input type="checkbox" checked={formData.enable_pt ?? true} onChange={(e) => setFormData({ ...formData, enable_pt: e.target.checked })} className="rounded border-border text-primary focus:ring-primary h-4 w-4" />
+                                    Enable PT (Professional Tax)
+                                </label>
                             </div>
                         </div>
                     </div>
