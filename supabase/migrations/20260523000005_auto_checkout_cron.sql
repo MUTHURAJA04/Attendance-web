@@ -204,6 +204,13 @@ BEGIN
     WHERE a.check_out IS NULL
       AND COALESCE(a.status, '') NOT IN ('ABSENT', 'LEAVE_APPROVED', 'LEAVE_UNAPPROVED')
       AND COALESCE((a.metadata->>'exclude_from_auto_checkout')::boolean, false) = false
+      AND (
+        (a.check_in AT TIME ZONE 'Asia/Kolkata')::date < v_ist_date
+        OR (
+          (a.check_in AT TIME ZONE 'Asia/Kolkata')::date = v_ist_date
+          AND v_now_ist::time >= '23:00:00'::time
+        )
+      )
   LOOP
     v_staff_names := array_append(v_staff_names, v_rec.employee_name);
     v_unclosed_list := v_unclosed_list || jsonb_build_object(

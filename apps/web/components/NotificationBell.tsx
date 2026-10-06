@@ -94,7 +94,25 @@ export function NotificationBell() {
       }
 
       if (logsRes.status === "fulfilled" && !logsRes.value.error && logsRes.value.data) {
-        const formattedLogs: UnclosedAttendanceItem[] = logsRes.value.data.map((item: any) => {
+        const now = new Date();
+        const todayIST = new Intl.DateTimeFormat("en-CA", {
+          timeZone: "Asia/Kolkata",
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+        }).format(now); // "YYYY-MM-DD"
+
+        const timeFormatter = new Intl.DateTimeFormat("en-GB", {
+          timeZone: "Asia/Kolkata",
+          hour: "2-digit",
+          minute: "2-digit",
+          hour12: false,
+        });
+        const currentISTTime = timeFormatter.format(now); // "HH:MM"
+
+        const formattedLogs: UnclosedAttendanceItem[] = [];
+
+        for (const item of (logsRes.value.data as any[])) {
           const checkInDate = new Date(item.check_in);
           const dateStr = new Intl.DateTimeFormat("en-CA", {
             timeZone: "Asia/Kolkata",
@@ -103,6 +121,14 @@ export function NotificationBell() {
             day: "2-digit",
           }).format(checkInDate);
 
+          // Suppress notifications during active workday before 11:00 PM IST
+          const isPastDate = dateStr < todayIST;
+          const isTodayPast11PM = dateStr === todayIST && currentISTTime >= "23:00";
+
+          if (!isPastDate && !isTodayPast11PM) {
+            continue;
+          }
+
           const timeFormatted = new Intl.DateTimeFormat("en-US", {
             timeZone: "Asia/Kolkata",
             hour: "2-digit",
@@ -110,7 +136,7 @@ export function NotificationBell() {
             hour12: true,
           }).format(checkInDate);
 
-          return {
+          formattedLogs.push({
             id: item.id,
             employee_id: item.employee_id,
             employee_name: item.employees?.full_name || "Staff",
@@ -120,8 +146,8 @@ export function NotificationBell() {
             date_str: dateStr,
             custom_time: "23:00",
             is_editing: false,
-          };
-        });
+          });
+        }
         setUnclosedList(formattedLogs);
       }
     } catch (err) {

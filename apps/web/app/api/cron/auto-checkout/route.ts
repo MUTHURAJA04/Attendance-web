@@ -43,7 +43,15 @@ async function handlePreCheckAlert() {
       month: "2-digit",
       day: "2-digit",
     });
-    const todayIST = formatter.format(now);
+    const todayIST = formatter.format(now); // "YYYY-MM-DD"
+
+    const timeFormatter = new Intl.DateTimeFormat("en-GB", {
+      timeZone: "Asia/Kolkata",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    });
+    const currentISTTime = timeFormatter.format(now); // "HH:MM"
 
     const { data: unclosedLogs, error: fetchError } = await supabase
       .from("attendance_logs")
@@ -66,6 +74,22 @@ async function handlePreCheckAlert() {
       }
       const isExcluded = Boolean(log.metadata?.exclude_from_auto_checkout);
       if (isExcluded) continue;
+
+      const checkInDate = new Date(log.check_in);
+      const checkInDateIST = new Intl.DateTimeFormat("en-CA", {
+        timeZone: "Asia/Kolkata",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      }).format(checkInDate);
+
+      // Only alert if check-in is for a past date OR today after 11:00 PM IST
+      const isPastDate = checkInDateIST < todayIST;
+      const isTodayPast11PM = checkInDateIST === todayIST && currentISTTime >= "23:00";
+
+      if (!isPastDate && !isTodayPast11PM) {
+        continue;
+      }
 
       const empName = log.employees?.full_name || "Staff";
       staffNames.push(empName);
