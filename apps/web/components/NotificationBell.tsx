@@ -45,9 +45,9 @@ export function NotificationBell() {
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  // Fetch all pending notifications and unclosed punches (SUPER_ADMIN only)
+  // Fetch all pending notifications and unclosed punches
   const fetchAllNotifications = useCallback(async () => {
-    if (role !== "SUPER_ADMIN") return;
+    if (role && !["SUPER_ADMIN", "PAYROLL_MANAGER", "BRAND_ADMIN", "BRANCH_ADMIN", "BRANCH_MANAGER", "MANAGER"].includes(role)) return;
     try {
       setLoading(true);
 
@@ -351,7 +351,18 @@ export function NotificationBell() {
     }
   };
 
-  if (role !== "SUPER_ADMIN") {
+  useEffect(() => {
+    const handleOpenNotifications = () => {
+      setIsOpen(true);
+      fetchAllNotifications();
+    };
+    window.addEventListener("open-notifications", handleOpenNotifications);
+    return () => {
+      window.removeEventListener("open-notifications", handleOpenNotifications);
+    };
+  }, [fetchAllNotifications]);
+
+  if (role && !["SUPER_ADMIN", "PAYROLL_MANAGER", "BRAND_ADMIN", "BRANCH_ADMIN", "BRANCH_MANAGER", "MANAGER"].includes(role)) {
     return null;
   }
 
