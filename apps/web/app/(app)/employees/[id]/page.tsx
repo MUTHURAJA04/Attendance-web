@@ -498,10 +498,14 @@ export default function EmployeeDetailPage() {
                                         <span className="text-xs font-medium text-muted-foreground uppercase tracking-widest">Phone</span>
                                         <span className="text-sm font-medium">{employee.phone}</span>
                                     </div>
-                                    <div className="flex flex-col gap-1">
-                                        <span className="text-xs font-medium text-muted-foreground uppercase tracking-widest">Gender</span>
-                                      {(employee as any).gender?.toLowerCase() || "Not specified"}
-                                    </div>
+                                 <div className="flex flex-col gap-1">
+  <span className="text-xs font-medium text-muted-foreground uppercase tracking-widest">
+    Gender
+  </span>
+  <span className="text-sm font-medium capitalize">
+    {(employee as any)?.gender?.toLowerCase() || "Not specified"}
+  </span>
+</div>
                                     <div className="flex flex-col gap-1">
                                         <span className="text-xs font-medium text-muted-foreground uppercase tracking-widest">Date of Birth</span>
                                         <span className="text-sm font-medium">
