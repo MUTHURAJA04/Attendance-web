@@ -500,7 +500,7 @@ export default function EmployeeDetailPage() {
                                     </div>
                                     <div className="flex flex-col gap-1">
                                         <span className="text-xs font-medium text-muted-foreground uppercase tracking-widest">Gender</span>
-                                        <span className="text-sm font-medium capitalize">{employee.gender?.toLowerCase() || "Not specified"}</span>
+                                        <span className="text-sm font-medium capitalize">   {(employee as any).gender?.toLowerCase() || "Not specified"</span>
                                     </div>
                                     <div className="flex flex-col gap-1">
                                         <span className="text-xs font-medium text-muted-foreground uppercase tracking-widest">Date of Birth</span>
